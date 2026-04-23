@@ -1,0 +1,79 @@
+---
+- name: Automate Registry Fix and Storage
+  hosts: kube_control_plane[0]  # 只在第一个 Master (node1) 上执行
+  become: yes
+  vars:
+    ansible_python_interpreter: "/home/metaxadmin/venv/bin/python3"
+    registry_path: "/data/registry"
+    registry_port: 31783
+    registry_pvc_name: "registry-pvc"
+
+  tasks:
+    - name: Install Essential Packages (AI/K8s Dependencies)
+      pip:
+        name:
+          - kubernetes
+        state: present
+        virtualenv: /home/metaxadmin/venv
+      tags: base
+
+    - name: 1. Ensure registry storage directory exists
+      file:
+        path: "{{ registry_path }}"
+        state: directory
+        mode: '0777'
+
+    - name: 2. Create Registry PV and PVC
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: PersistentVolume
+          metadata:
+            name: registry-pv
+          spec:
+            capacity:
+              storage: 15Gi
+            accessModes:
+              - ReadWriteOnce
+            persistentVolumeReclaimPolicy: Retain
+            hostPath:
+              path: "{{ registry_path }}"
+            nodeAffinity:
+              required:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: kubernetes.io/hostname
+                        operator: In
+                        values:
+                          - "{{ inventory_hostname }}"
+      
+    - name: 3. Create Registry PVC
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: "{{ registry_pvc_name }}"
+            namespace: kube-system
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 15Gi
+            volumeName: registry-pv
+
+    - name: 4. Patch Registry Service to NodePort
+      kubernetes.core.k8s:
+        state: patched
+        kind: Service
+        name: registry
+        namespace: kube-system
+        definition:
+          spec:
+            type: NodePort
+            ports:
+              - port: 5000
+                nodePort: "{{ registry_port }}"
+                targetPort: 5000

@@ -1,0 +1,9 @@
+- name: set server hostname
+  ansible.builtin.hostname:
+    name: "{{ hostnames[0] }}"
+
+- name: update servers' hostname of the cluster into /etc/hosts
+  loop: "{{ groups['all'] }}"
+  ansible.builtin.lineinfile:
+    line: "{{ hostvars[item].ansible_host }} {{ hostvars[item].hostnames | join(' ') }}"
+    dest: "/etc/hosts"

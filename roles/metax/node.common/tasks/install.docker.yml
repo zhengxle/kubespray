@@ -1,0 +1,94 @@
+- name: prepare play variables
+  ansible.builtin.set_fact:
+    pkg_path: "/opt/mxdeployment/share/deb/{{ ansible_distribution | lower }}/{{ ansible_distribution_version | lower }}/docker"
+
+- name: ensure docker package cache directory exists
+  ansible.builtin.file:
+    path: "{{ pkg_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: upload docker packages to remote server
+  ansible.builtin.copy:
+    src: "{{ pkg_path }}/"
+    dest: "{{ pkg_path }}/"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: get all docker deb files
+  ansible.builtin.find:
+    paths: "{{ pkg_path }}"
+    patterns:
+      - "*.deb"
+  register: deb_files
+
+- name: install docker deb files
+  ansible.builtin.apt:
+    deb: "{{ item.path }}"
+  loop: "{{  deb_files.files }}"
+
+- name: add current user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: true
+
+- name: startup docker service
+  ansible.builtin.systemd:
+    name: 'docker'
+    state: started
+    enabled: true
+
+- name: collect service states
+  ansible.builtin.service_facts:
+
+- name: ensure docker service startup
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services['docker.service'].state == 'running'
+    fail_msg: "Docker Service Startup Failed"
+    success_msg: "Docker Service Startup Succeed"
+
+- name: ensure containerd config folder exists
+  ansible.builtin.file:
+    path: "/etc/docker"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: generate docker config
+  ansible.builtin.copy:
+    dest: "/etc/docker/daemon.json"
+    content: |
+      {
+        "insecure-registries": [
+          "harbor.mxpid.local"
+        ],
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "10m",
+          "max-file": "3"
+        },
+        "storage-driver": "overlay2"
+      }
+
+- name: restart docker service
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+    daemon_reload: true
+    enabled: true
+
+- name: collect service states
+  ansible.builtin.service_facts:
+
+- name: ensure docker service startup
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services['docker.service'].state == 'running'
+    fail_msg: "Docker Service Startup Failed"
+    success_msg: "Docker Service Startup Succeed"

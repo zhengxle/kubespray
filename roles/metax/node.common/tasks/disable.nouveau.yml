@@ -1,0 +1,24 @@
+- name: Get nouveau installation status
+  register: driver_status
+  ignore_errors: true
+  ansible.builtin.shell: |
+    lsmod | grep nouveau
+  
+- name: Unload nouveau kernel module
+  when: driver_status.rc == 0
+  ansible.builtin.shell: |
+    modprobe -r nouveau
+
+- name: Add nouveau into modprobe blacklist
+  when: driver_status.rc == 0
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/nouveau-blacklist.conf
+    content: |
+      blacklist nouveau
+      options nouveau modeset=0
+
+
+- name: Update initramfs
+  when: driver_status.rc == 0
+  ansible.builtin.shell: |
+    update-initramfs -u

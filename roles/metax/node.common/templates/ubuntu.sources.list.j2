@@ -1,0 +1,3 @@
+deb {{ system.repo }} {{ansible_facts["distribution_release"]}} main restricted universe multiverse
+deb {{ system.repo }} {{ansible_facts["distribution_release"]}}-updates main restricted universe multiverse
+deb {{ system.repo }} {{ansible_facts["distribution_release"]}}-backports main restricted universe multiverse

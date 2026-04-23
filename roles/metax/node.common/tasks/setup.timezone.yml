@@ -1,0 +1,17 @@
+- name: check original timezone
+  ansible.builtin.command: timedatectl show --property=Timezone --value
+  register: org_tz
+
+- name: setup the timezone
+  when: org_tz.stdout != system.timezone
+  ansible.builtin.command: timedatectl set-timezone {{ system.timezone }}
+
+- name: get current timezone
+  ansible.builtin.command: timedatectl show --property=Timezone --value
+  register: new_tz
+
+- name: check timezone setup result
+  ansible.builtin.assert:
+    that:
+      - system.timezone == new_tz.stdout
+    

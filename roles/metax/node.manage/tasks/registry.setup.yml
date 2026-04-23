@@ -1,0 +1,61 @@
+- name: prepare play variables
+  ansible.builtin.set_fact:
+    image_root: "/opt/mxdeployment/share/images/registry"
+
+
+- name: ensure registry image cache directory exists
+  ansible.builtin.file:
+    path: "{{ image_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: upload registry image to cache directory
+  ansible.builtin.copy:
+    src: "{{ image_root }}/"
+    dest: "{{ image_root }}/"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: ensure registry container volume folder exists
+  ansible.builtin.file:
+    path: "/var/volumes/registry"
+    state: directory
+    mode: "0777"
+
+- name: load registry container image
+  community.docker.docker_image_load:
+    path: "{{ image_root }}/registry.tar.gz"
+  register: image
+
+- name: stop and remove existed registry container
+  community.docker.docker_container:
+    name: mxpid-registry
+    state: absent
+  ignore_errors: yes
+
+- name: get image name from load results
+  set_fact:
+    image_name: "{{ image.images[0].RepoTags[0] }}"
+
+- name: startup registry service
+  community.docker.docker_container:
+    name: mxpid-registry
+    image: "{{ image_name }}"
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "80:5000"
+    volumes:
+      - "/var/volumes/registry:/var/lib/registry"
+
+- name: wait for container startup
+  community.docker.docker_container_info:
+    name: mxpid-registry
+  register: container_info
+  until: container_info.container.State.Running
+  retries: 30
+  delay: 2
+

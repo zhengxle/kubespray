@@ -1,0 +1,106 @@
+---
+- name: 3. Post-Install Hardening (Registry & MetaX)
+  hosts: all
+  become: yes
+  vars:
+    # 基础变量定义
+    master_node_name: "{{ groups['kube_control_plane'][0] }}"
+    registry_host: "{{ hostvars[master_node_name]['ansible_host'] | default(hostvars[master_node_name]['inventory_hostname']) }}"
+    registry_port: 31783
+    registry_path: "/data/registry"
+    
+    # 架构师避坑逻辑：仅在 node1 上使用特定的 venv 解释器
+    # 这样即使 node2/node3 没有这个 venv，脚本也不会报错
+    custom_python: "{{ (inventory_hostname == 'node1') | ternary('/home/metaxadmin/venv/bin/python3', '/usr/bin/python3') }}"
+
+  tasks:
+    # 任务 1：创建目录（注意独立横杠）
+    - name: Create .kube directory for user
+      file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      when: inventory_hostname in groups['kube_control_plane']
+
+    # 任务 2：复制文件（注意独立横杠）
+    - name: Copy admin.conf to user kubeconfig
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: yes
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0600'
+      when: inventory_hostname in groups['kube_control_plane']
+
+    ## --- 1. 存储与服务加固 (仅在第一个 Master 执行) ---
+    - name: Configure Registry Storage and Service
+      kubernetes.core.k8s:
+        definition: "{{ item }}"
+      loop:
+        # 定义持久化卷 (PV)
+        - apiVersion: v1
+          kind: PersistentVolume
+          metadata:
+            name: registry-pv
+          spec:
+            capacity: { storage: 20Gi }
+            accessModes: [ReadWriteOnce]
+            persistentVolumeReclaimPolicy: Retain
+            hostPath: { path: "{{ registry_path }}" }
+            nodeAffinity:
+              required:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: kubernetes.io/hostname
+                        operator: In
+                        values: ["{{ master_node_name }}"]
+        
+        # 定义持久化卷声明 (PVC)
+        - apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: registry-pvc
+            namespace: kube-system
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources: { requests: { storage: 20Gi } }
+            volumeName: registry-pv
+      
+      # 显式在此任务中使用动态解释器
+      vars:
+        ansible_python_interpreter: "{{ custom_python }}"
+      when: inventory_hostname == master_node_name
+
+    - name: Patch Registry Service to NodePort
+      kubernetes.core.k8s:
+        state: patched
+        kind: Service
+        name: registry
+        namespace: kube-system
+        definition:
+          spec:
+            type: NodePort
+            ports: [{ port: 5000, nodePort: "{{ registry_port }}", targetPort: 5000 }]
+      vars:
+        ansible_python_interpreter: "{{ custom_python }}"
+      when: inventory_hostname == master_node_name
+
+    ## --- 2. 容器运行时信任配置 (全集群执行) ---
+    - name: Ensure Containerd cert directory exists
+      file:
+        path: "/etc/containerd/certs.d/{{ registry_host }}:{{ registry_port }}"
+        state: directory
+        mode: '0755'
+
+    - name: Distribute Registry trust (hosts.toml)
+      copy:
+        dest: "/etc/containerd/certs.d/{{ registry_host }}:{{ registry_port }}/hosts.toml"
+        content: |
+          server = "http://{{ registry_host }}:{{ registry_port }}"
+          [host."http://{{ registry_host }}:{{ registry_port }}"]
+            capabilities = ["pull", "push"]
+            skip_verify = true
+      # 这一步使用标准模块，系统 Python 即可胜任

@@ -1,0 +1,35 @@
+---
+- name: Check if UFW is active
+  ansible.builtin.command: ufw status
+  register: ufw_status
+  ignore_errors: true
+
+- name: Disable UFW firewall
+  ansible.builtin.ufw:
+    state: disabled
+  when: ufw_status.rc == 0
+
+- name: Check if Firewalld is active
+  ansible.builtin.command: firewall-cmd --state
+  register: firewalld_status
+  ignore_errors: true
+
+- name: Stop and disable Firewalld
+  ansible.builtin.service:
+    name: firewalld
+    state: stopped
+    enabled: false
+  when: firewalld_status.rc == 0
+
+- name: Check if iptables is active
+  ansible.builtin.command: iptables -L
+  register: iptables_status
+  ignore_errors: true
+
+- name: Stop and disable iptables
+  ansible.builtin.service:
+    name: iptables
+    state: stopped
+    enabled: false
+  ignore_errors: true
+  when: iptables_status.rc == 0

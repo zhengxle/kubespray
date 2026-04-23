@@ -1,0 +1,17 @@
+- name: Ensure MACA driver workspace exists
+  ansible.builtin.file:
+    path: "{{ maca_driver_workspace }}"
+    state: directory
+    mode:  "0777"
+
+- name: Upload target driver package to server
+  ansible.builtin.copy:
+    src: "{{ maca.driver.package }}"
+    dest: "{{ maca_driver_workspace }}"
+    mode: "0777"
+
+- name: Install MACA driver
+  ansible.builtin.shell: |
+    installScaript=$(basename {{  maca.driver.package }})
+    cd {{ maca_driver_workspace }}
+    bash ./$installScaript -- -f

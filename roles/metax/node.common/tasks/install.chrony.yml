@@ -1,0 +1,89 @@
+- name: prepare play variables
+  ansible.builtin.set_fact:
+    pkg_path: "/opt/mxdeployment/share/deb/{{ ansible_distribution | lower }}/{{ ansible_distribution_version | lower }}/chrony"
+
+- name: ensure chrony package cache directory exists
+  ansible.builtin.file:
+    path: "{{ pkg_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: upload chrony packages to remote server
+  ansible.builtin.copy:
+    src: "{{ pkg_path }}/"
+    dest: "{{ pkg_path }}/"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: get all chrony deb files
+  ansible.builtin.find:
+    paths: "{{ pkg_path }}"
+    patterns:
+      - "*.deb"
+  register: deb_files
+
+- name: install chrony deb files
+  ansible.builtin.apt:
+    deb: "{{ item.path }}"
+  loop: "{{  deb_files.files }}"
+
+  
+- name: startup chrony service
+  ansible.builtin.systemd:
+    name: 'chrony'
+    state: started
+    enabled: true
+
+- name: collect service states
+  ansible.builtin.service_facts:
+
+- debug:
+    var: ansible_facts.services['chrony'] 
+
+- name: ensure chrony service startup
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services['chrony'].state == 'running'
+    fail_msg: "Chrony Service Startup Failed"
+    success_msg: "Chrony Service Startup Succeed"
+    
+- name: Determine if this server is internal NTP server
+  ansible.builtin.set_fact:
+    is_internal_ntp_server: "{{  ansible_host in (ntp.local | default([]))  }}"
+
+- name: Configure chrony as internal NTP server
+  when: is_internal_ntp_server
+  ansible.builtin.template:
+    src: chrony-server.conf.j2
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: 0644
+
+- name: setup chrony client with local server
+  when: not is_internal_ntp_server
+  ansible.builtin.template:
+    src: chrony-client.conf.j2
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Restart and enable chrony service
+  ansible.builtin.systemd:
+    name: chrony
+    state: restarted
+    enabled: true
+    daemon_reload: true
+
+- name: Verify chrony synchronization
+  command: chronyc sources -v
+  register: chrony_sources
+  changed_when: false
+
+- name: Display chrony status
+  debug:
+    msg: "{{ chrony_sources.stdout_lines }}"

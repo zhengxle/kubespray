@@ -1,0 +1,20 @@
+mx_deployment_root: '/opt/mxdeployment'
+mx_infra_root: "/opt/mxinfra"
+mx_platform_root: '/opt/mxplatform'
+
+package_root: "{{ mx_deployment_root }}/share/packages/{{ ansible_distribution | lower }}/{{ ansible_distribution_version }}/{{ ansible_architecture }}"
+
+
+ssh_key_type: rsa
+ssh_key_bits: 2048
+ssh_private_keyfile: "id_{{ssh_key_type}}"
+ssh_public_keyfile: "id_{{ssh_key_type}}.pub"
+ssh_local_folder: "/var/mxpid/ssh"
+ssh_local_known_hosts: "{{ ssh_local_folder }}/known_hosts"
+ssh_local_private_keyfile: "{{ ssh_local_folder }}/{{ ssh_private_keyfile }}"
+ssh_local_public_keyfile: "{{ ssh_local_folder }}/{{ ssh_public_keyfile }}"
+ssh_remote_folder: "/home/{{ ansible_user }}/.ssh"
+ssh_remote_known_hosts: "{{ ssh_remote_folder }}/known_hosts"
+ssh_remote_private_keyfile: "{{ ssh_remote_folder }}/{{ ssh_private_keyfile }}"
+ssh_remote_public_keyfile: "{{ ssh_remote_folder }}/{{ ssh_public_keyfile }}"
+ssh_remote_authorized_keys: "{{ ssh_remote_folder }}/authorized_keys"

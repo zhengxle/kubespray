@@ -1,0 +1,9 @@
+---
+# 阶段 1: 环境预检与系统调优
+- import_playbook: prepare_nodes.yml
+
+# 阶段 2: 调用 Kubespray 标准安装 (耗时最长)
+- import_playbook: ../cluster.yml
+
+# 阶段 3: 自动化加固 (调用刚才完善好的 post_install.yml)
+- import_playbook: post_install.yml

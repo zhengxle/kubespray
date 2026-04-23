@@ -1,0 +1,33 @@
+---
+- name: MetaX GPU Infrastructure Deployment
+  hosts: kube_node:!kube_control_plane
+  become: yes
+  vars_files:
+    - inventory/my-cluster/group_vars/all/metax.yml
+  
+  tasks:
+    # 1. 禁用原生的 Nouveau 驱动 (防止冲突)
+    - name: Disable nouveau
+      include_role:
+        name: ./roles/metax/node.common
+        tasks_from: disable.nouveau.yml
+
+    # 2. 安装 MACA 驱动
+    - name: Install MACA Driver
+      include_role:
+        name: ./roles/metax/node.compute
+        tasks_from: install.maca.driver.yml
+      when: maca.driver.enable
+
+    # 3. 安装 MACA SDK (包含运行时)
+    - name: Install MACA SDK
+      include_role:
+        name: ./roles/metax/node.compute
+        tasks_from: install.maca.sdk.yml
+      when: maca.sdk.enable
+
+    # 4. 安装监控 Exporter
+    - name: Install MetaX Exporter
+      include_role:
+        name: ./roles/metax/node.compute
+        tasks_from: install.mx.exporter.yml

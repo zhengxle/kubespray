@@ -1,0 +1,44 @@
+# - name: Initialize mxpid
+#   ansible.builtin.import_tasks:
+#     file: "install.mxpid.yml"
+
+# - name: setup hostname
+#   ansible.builtin.import_tasks:
+#     file: "setup.hostname.yml"
+
+# - name: setup timezone
+#   ansible.builtin.import_tasks:
+#     file: "setup.timezone.yml"
+
+# - name: disable system auto upgrade
+#   ansible.builtin.import_tasks:
+#     file: "disable.auto.upgrade.yml"
+
+# - name: disable conflict drivers
+#   ansible.builtin.import_tasks:
+#     file: "disable.nouveau.yml"
+
+# - name: disable firewall
+#   ansible.builtin.import_tasks:
+#     file: "disable.firewall.yml"
+
+# - name: setup ssh login without password
+#   ansible.builtin.import_tasks:
+#     file: "setup.ssh.login.without.password.yml"
+
+# - name: install NFS
+#   ansible.builtin.import_tasks:
+#     file: "install.nfs.yml"
+
+# - name: install NTP
+#   ansible.builtin.import_tasks:
+#     file: "install.chrony.yml"
+
+- name: install containerd
+  ansible.builtin.import_tasks:
+    file: "install.containerd.yml"
+
+- name: install docker
+  ansible.builtin.import_tasks:
+    file: "install.docker.yml"
+

@@ -1,0 +1,95 @@
+---
+- name: 1. Prepare Nodes for MetaX Kubernetes Cluster
+  hosts: all
+  become: yes
+  vars:
+    # 动态获取第一个 Master (node1) 的物理 IP 作为后续 Registry 信任地址
+    master_ip: "{{ hostvars[groups['kube_control_plane'][0]]['ansible_host'] | default(hostvars[groups['kube_control_plane'][0]]['inventory_hostname']) }}"
+    registry_addr: "{{ master_ip }}:31783"
+
+  tasks:
+    - name: Create sudoers file for current user
+      copy:
+        content: "{{ ansible_user }} ALL=(ALL) NOPASSWD:ALL"
+        dest: "/etc/sudoers.d/{{ ansible_user }}"
+        owner: root
+        group: root
+        mode: '0440'  # 必须是 0440 权限，否则 sudo 会报错
+        validate: '/usr/sbin/visudo -cf %s' # 关键：写入前验证语法，防止配错导致全团连不上
+
+    ## --- 1. 系统基础环境清理 ---
+    - name: Disable SWAP (Kubernetes Mandatory)
+      shell: |
+        swapoff -a
+        sed -i '/swap/s/^/#/' /etc/fstab
+      tags: base
+
+    - name: Install Essential Packages (AI/K8s Dependencies)
+      apt:
+        name: [ 'nfs-common', 'socat', 'conntrack', 'ebtables', 'ipset', 'lvm2', 'curl', 'python3-pip' ]
+        state: present
+        update_cache: yes
+      tags: base
+
+    ## --- 2. 内核与网络调优 (针对 AI 训练的大规模内存映射优化) ---
+    - name: Load Necessary Kernel Modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: [ 'overlay', 'br_netfilter' ]
+
+    - name: Persist Kernel Modules Load on Boot
+      copy:
+        dest: /etc/modules-load.d/k8s.conf
+        content: |
+          overlay
+          br_netfilter
+
+    - name: Configure Sysctl Parameters
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_file: /etc/sysctl.d/k8s.conf
+      loop:
+        - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+        - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { name: 'net.ipv4.ip_forward', value: '1' }
+        # AI 集群调优：防止在大规模深度学习训练时出现内存映射限制
+        - { name: 'vm.max_map_count', value: '262144' }
+      tags: sysctl
+
+    ## --- 3. 目录架构标准化 ---
+    - name: Create Standard Directories
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: "{{ item.mode | default('0755') }}"
+        owner: root
+        group: root
+      loop:
+        - { path: "/data/registry", mode: '0777' }
+        - { path: "/etc/containerd/certs.d/{{ registry_addr }}" }
+        - { path: "/opt/mxdriver" } # 预留 MetaX 驱动包存放路径
+        - { path: "/etc/kubernetes/manifests" } # 预留静态 Pod 路径
+        - { path: "/etc/systemd/resolved.conf.d" }
+
+    ## --- 4. 离线 Registry 信任配置 (自动识别主节点) ---
+    - name: Configure Containerd Trust for Local Registry
+      copy:
+        dest: "/etc/containerd/certs.d/{{ registry_addr }}/hosts.toml"
+        content: |
+          server = "http://{{ registry_addr }}"
+          [host."http://{{ registry_addr }}"]
+            capabilities = ["pull", "push"]
+            skip_verify = true
+      # node1 已经手动配置过或作为服务端，此处通常为 Worker 节点同步
+      # 但为了“一键式”一致性，全量覆盖一次也是安全的
+      tags: registry
+
+    ## --- 5. 架构师的小细节：配置 SSH KeepAlive ---
+    - name: Ensure SSH Connection Stability during long installs
+      lineinfile:
+        path: /etc/ssh/ssh_config
+        line: "    ServerAliveInterval 60"
+        state: present

@@ -1,0 +1,101 @@
+- name: prepare play variables
+  ansible.builtin.set_fact:
+    pkg_path: "/opt/mxdeployment/share/deb/{{ ansible_distribution | lower }}/{{ ansible_distribution_version | lower }}/nfs"
+
+- name: ensure nfs package cache directory exists
+  ansible.builtin.file:
+    path: "{{ pkg_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: upload nfs packages to remote server
+  ansible.builtin.copy:
+    src: "{{ pkg_path }}/"
+    dest: "{{ pkg_path }}/"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: get all nfs deb files
+  ansible.builtin.find:
+    paths: "{{ pkg_path }}"
+    patterns:
+      - "*.deb"
+  register: deb_files
+
+- name: install nfs deb files
+  ansible.builtin.apt:
+    deb: "{{ item.path }}"
+  loop: "{{  deb_files.files }}"
+
+- name: startup nfs service
+  ansible.builtin.systemd:
+    name: 'nfs-kernel-server'
+    state: started
+    enabled: true
+
+- name: collect service states
+  ansible.builtin.service_facts:
+
+- name: ensure NFS service startup
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services['nfs-kernel-server.service'].state == 'active'
+    fail_msg: "NFS Service Startup Failed"
+    success_msg: "NFS Service Startup Succeed"
+
+
+- name: prepare nfs folder as nfs server
+  loop: "{{ nfs }}"
+  when:
+    - item.server == ansible_host
+  ansible.builtin.file:
+    path: "{{ item.remote }}"
+    state: directory
+    mode: 0777
+
+- name: register nfs folder as nfs server
+  loop: "{{ nfs }}"
+  when:
+    - item.server == ansible_host
+  lineinfile:
+    path: /etc/exports
+    line: "{{ item.remote }} *(rw,sync,no_subtree_check,no_root_squash,anonuid=1001,anongid=1001)"
+    state: present
+
+- name: restart NFS service
+  ansible.builtin.systemd:
+    name: nfs-kernel-server
+    state: restarted
+    daemon_reload: true
+    enabled: true
+
+- name: collect service states
+  ansible.builtin.service_facts:
+
+- name: ensure NFS service startup
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services['nfs-kernel-server.service'].state == 'active'
+    fail_msg: "NFS Service Startup Failed"
+    success_msg: "NFS Service Startup Succeed"
+
+
+- name: ensure local mount folder exists
+  loop: "{{ nfs }}"
+  ansible.builtin.file:
+    path: "{{ item.local }}"
+    state: directory
+    mode: 0777
+
+- name: Mount NFS folders
+  loop: "{{ nfs }}"
+  ansible.posix.mount:
+    src: "{{item.server}}:{{ item.remote }}"
+    path: "{{ item.local }}"
+    fstype: nfs
+    state: mounted
+    opts: rw,sync,hard
+

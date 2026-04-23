@@ -1,0 +1,36 @@
+- name: Ensure MACA SDK package cache folder exist
+  ansible.builtin.file:
+    path: "{{ maca_sdk_cache }}"
+    state: directory
+    mode: "0777"
+
+- name: Ensure MACA SDK workspace folder exists
+  ansible.builtin.file:
+    path: "{{ maca_sdk_workspace }}"
+    state: directory
+    mode: "0777" 
+
+- name: Upload MACA SDK package
+  ansible.builtin.copy:
+    src: "{{ maca.sdk.package }}"
+    dest: "{{ maca_sdk_workspace }}"
+    mode: 0777
+
+- name: Unarchive MACA SDK package
+  ansible.builtin.shell: |
+    cd {{ maca_sdk_cache }}
+    rm -rf ./*
+    tar -xf {{ maca_sdk_workspace }}/$(basename {{ maca.sdk.package }})
+
+- name: Search SDK installation script
+  ansible.builtin.find:
+    paths:
+      - "{{ maca_sdk_cache }}"
+    patterns:
+      - "mxmaca-sdk-install.sh"
+    recurse: true
+  register: scripts
+
+- name: Instal MACA SDK
+  ansible.builtin.shell: |
+    bash {{ scripts['files'][0]['path'] }} --force

@@ -1,0 +1,22 @@
+- name: Install MXMACA driver
+  when:
+    - maca.enable | default(False)
+    - maca.driver.enable | default(False)
+    - maca.driver.package | default('')
+  ansible.builtin.import_tasks:
+    file: "install.maca.driver.yml"
+
+- name: Install MXMACA SDK
+  when:
+    - maca.enable | default(False)
+    - maca.sdk.enable | default(False)
+    - maca.sdk.package | default('')
+  ansible.builtin.import_tasks:
+    file: "install.maca.sdk.yml"
+
+- name: Upgrade GPU firmware
+  when:
+    - maca.enable | default(False)
+    - maca.vbios.enable | default(False)
+  ansible.builtin.import_tasks:
+    file: "install.maca.fw.yml"

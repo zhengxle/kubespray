@@ -1,0 +1,31 @@
+- name: Get GPU Model
+  register: gpu_model
+  ansible.builtin.shell: |
+    mx-smi -L | grep GPU | awk '{ print $2 }' | uniq | head -n 1 | sed 's/MX//'
+
+- name: Lookup GPU firmware binary
+  register: vbios_bin
+  ansible.builtin.shell: |
+    ls /lib/firmware/metax/*/* | grep {{ gpu_model.stdout }}.bin
+
+- name: Stop all running processes with GPUs
+  ansible.builtin.shell: |
+    mx-smi --kill-all-process
+
+
+- name: Upgrade GPU firmware
+  register: upgrade_result
+  ansible.builtin.shell: |
+    mx-smi -u {{ vbios_bin.stdout }} -t 600
+
+
+- name: Check firmware upgrade result
+  ansible.builtin.assert:
+    that:
+      - "'vbios-upgrade Done' in upgrade_result.stdout"
+    fail_msg: "upgrade vbios failed" 
+
+- name: Reboot Server
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+    connect_timeout: 1800

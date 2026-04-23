@@ -1,0 +1,11 @@
+package_root: "/home/martin/workspace/projects/mxdeployment/share/packages/{{ ansible_distribution | lower }}/{{ ansible_distribution_version }}/{{ ansible_architecture }}"
+
+mxpid_root: "/var/mxpid"
+mxpid_maca_sdk:
+  root: "/var/mxpid/maca/sdk/"
+  path: "/var/mxpid/maca/sdk/{{maca.sdk.package}}"
+  cache_path: "/var/mxpid/maca/sdk/cache"
+
+maca_driver_workspace: "/var/mxpid/maca/driver/"
+maca_sdk_workspace: "/var/mxpid/maca/sdk/"
+maca_sdk_cache: "/var/mxpid/maca/sdk/cache"

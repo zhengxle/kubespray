@@ -1,0 +1,104 @@
+- name: prepare play variables
+  ansible.builtin.set_fact:
+    pkg_path: "/opt/mxdeployment/share/deb/{{ ansible_distribution | lower }}/{{ ansible_distribution_version | lower }}/containerd"
+
+- name: ensure containerd package cache directory exists
+  ansible.builtin.file:
+    path: "{{ pkg_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: upload containerd packages to remote server
+  ansible.builtin.copy:
+    src: "{{ pkg_path }}/"
+    dest: "{{ pkg_path }}/"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: get all containerd deb files
+  ansible.builtin.find:
+    paths: "{{ pkg_path }}"
+    patterns:
+      - "*.deb"
+  register: deb_files
+
+- name: install containerd deb files
+  ansible.builtin.apt:
+    deb: "{{ item.path }}"
+  loop: "{{  deb_files.files }}"
+
+- name: startup containerd service
+  ansible.builtin.systemd:
+    name: 'containerd'
+    state: started
+    enabled: true
+
+- name: collect service states
+  ansible.builtin.service_facts:
+
+- name: ensure containerd service startup
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services['containerd.service'].state == 'running'
+    fail_msg: "Containerd Service Startup Failed"
+    success_msg: "Containerd Service Startup Succeed"
+
+- name: ensure containerd config folder exists
+  ansible.builtin.file:
+    path: "/etc/containerd/"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: ensure certs.d folder exists
+  ansible.builtin.file:
+    path: "/etc/containerd/certs.d"
+    state: directory
+    mode: '0755'
+
+- name: upload containerd config file
+  ansible.builtin.copy:
+    src: "{{ pkg_path }}/config.toml"
+    dest: "/etc/containerd/config.toml"
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: generate custom registry config folder
+  ansible.builtin.file:
+    path: "/etc/containerd/certs.d/harbor.mxpid.local"
+    state: directory
+    mode: '0755'
+
+- name: generate custom registry config file
+  ansible.builtin.copy:
+    dest: "/etc/containerd/certs.d/harbor.mxpid.local/hosts.toml"
+    content: |
+      server = "http://harbor.mxpid.local"
+      [host."http://harbor.mxpid.local"]
+        capabilities = ['pull', 'resolve', 'push']
+        skip_verify = true
+
+# 创建自定义registry配置
+
+- name: restart containerd service
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+    daemon_reload: true
+    enabled: true
+
+- name: collect service states
+  ansible.builtin.service_facts:
+
+- name: ensure containerd service startup
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services['containerd.service'].state == 'running'
+    fail_msg: "Containerd Service Startup Failed"
+    success_msg: "Containerd Service Startup Succeed"

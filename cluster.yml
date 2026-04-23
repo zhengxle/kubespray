@@ -1,3 +1,4 @@
 ---
 - name: Install Kubernetes
+  become: yes
   ansible.builtin.import_playbook: playbooks/cluster.yml

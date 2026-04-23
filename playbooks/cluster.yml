@@ -1,11 +1,13 @@
 ---
 - name: Common tasks for every playbooks
+  become: yes
   import_playbook: boilerplate.yml
 
 - name: Gather facts
   import_playbook: internal_facts.yml
 
 - name: Prepare for etcd install
+  become: yes
   hosts: k8s_cluster:etcd
   gather_facts: false
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
@@ -17,12 +19,14 @@
     - { role: download, tags: download, when: "not skip_downloads" }
 
 - name: Install etcd
+  become: yes
   vars:
     etcd_cluster_setup: true
     etcd_events_cluster_setup: "{{ etcd_events_cluster_enabled }}"
   import_playbook: install_etcd.yml
 
 - name: Install Kubernetes nodes
+  become: yes
   hosts: k8s_cluster
   gather_facts: false
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
@@ -32,6 +36,7 @@
     - { role: kubernetes/node, tags: node }
 
 - name: Install the control plane
+  become: yes
   hosts: kube_control_plane
   gather_facts: false
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
@@ -43,6 +48,7 @@
     - { role: kubernetes-apps/cluster_roles, tags: cluster-roles }
 
 - name: Invoke kubeadm and install a CNI
+  become: yes
   hosts: k8s_cluster
   gather_facts: false
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
@@ -56,6 +62,7 @@
     - { role: network_plugin, tags: network }
 
 - name: Install Calico Route Reflector
+  become: yes
   hosts: calico_rr
   gather_facts: false
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
@@ -65,6 +72,7 @@
     - { role: network_plugin/calico/rr, tags: ['network', 'calico_rr'] }
 
 - name: Patch Kubernetes for Windows
+  become: yes
   hosts: kube_control_plane[0]
   gather_facts: false
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
@@ -74,6 +82,7 @@
     - { role: win_nodes/kubernetes_patch, tags: ["control-plane", "win_nodes"] }
 
 - name: Install Kubernetes apps
+  become: yes
   hosts: kube_control_plane
   gather_facts: false
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
@@ -87,6 +96,7 @@
     - { role: kubernetes-apps, tags: apps }
 
 - name: Apply resolv.conf changes now that cluster DNS is up
+  become: yes
   hosts: k8s_cluster
   gather_facts: false
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"

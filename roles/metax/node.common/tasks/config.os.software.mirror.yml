@@ -1,0 +1,12 @@
+- name: Configure Package Sources
+  when:
+    - ansible_facts["distribution"] | lower in ['ubuntu']
+  ansible.builtin.template:
+    src: ubuntu.sources.list.j2
+    dest: "/etc/apt/sources.list"
+    mode: "0644"
+    backup: true
+
+- name: Update the package cache
+  ansible.builtin.apt:
+    update_cache: yes

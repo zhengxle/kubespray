@@ -1,0 +1,44 @@
+{% for server in ntp.remote %}
+pool {{ server }} iburst maxsources 4
+{% endfor %}
+
+# Record the rate at which the system clock gains/losses time
+driftfile /var/lib/chrony/chrony.drift
+
+# Allow NTP client access from local network
+allow 192.168.0.0/16
+allow 10.0.0.0/8
+allow 172.16.0.0/12
+
+# Serve time even if not synchronized to a time source
+local stratum 10
+
+# Directory for log files
+logdir /var/log/chrony
+
+# Save clock updates on system shutdown
+dumponexit
+
+# Specify directory for dump files
+dumpdir /var/lib/chrony
+
+# Key file for NTP authentication
+keyfile /etc/chrony/chrony.keys
+
+# Command key for chronyc
+commandkey 1
+
+# Generate command key if missing
+generatecommandkey
+
+# Disable logging of client accesses
+noclientlog
+
+# Specify log files
+logchange 0.5
+
+# RTCDEVICE
+rtcdevice /dev/rtc0
+
+# Makestep
+makestep 1.0 3

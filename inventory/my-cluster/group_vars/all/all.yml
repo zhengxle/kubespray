@@ -140,6 +140,28 @@ unsafe_show_logs: false
 
 ## If enabled it will allow kubespray to attempt setup even if the distribution is not supported. For unsupported distributions this can lead to unexpected failures in some cases.
 allow_unsupported_distribution_setup: false
+docker_users:
+  - "{{ ansible_user }}"
+
+docker_insecure_registries:
+  - "192.168.199.101:31783"
+# 强制定义仓库入口和协议
+
+containerd_registries:
+  "192.168.199.101:31783":
+    - "http://192.168.199.101:31783"
+
+# 针对旧版 Kubespray 或特定插件的补充（建议同时加上）
+containerd_insecure_registries:
+  "192.168.199.101:31783": "http://192.168.199.101:31783"
+
+containerd_users:
+  - "{{ ansible_user }}"
+
+# 3. 强制 containerd 创建 socket 时允许 docker 组访问 (非常关键)
+containerd_cfg_extra_vars:
+  grpc:
+    gid: "{{ docker_gid.stdout | default(999) }}"
 
 download_run_once: true
 download_force_cache: true

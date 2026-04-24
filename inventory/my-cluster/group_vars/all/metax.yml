@@ -1,0 +1,14 @@
+# metax_vars.yml
+maca:
+  enable: true
+  driver:
+    enable: true
+    # 确保此路径在 node3/node4 上真实存在，或者改为你存放 .run 包的路径
+    package: "/tmp/metax-driver-3.2.1.12-deb-x86_64.run" 
+  sdk:
+    enable: true
+    package: "/tmp/maca-sdk-3.2.1.10-deb-x86_64.tar.xz"
+
+# K8s 扩展组件（只需这一个包）
+metax_gpu_k8s:
+  package: "/tmp/metax-gpu-k8s-package.0.13.1.tar.gz"

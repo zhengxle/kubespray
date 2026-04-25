@@ -3,6 +3,7 @@
   hosts: all
   become: yes
   vars:
+    venv_path: "/home/{{ ansible_user }}/venv/bin/python3"
     # 基础变量定义
     master_node_name: "{{ groups['kube_control_plane'][0] }}"
     registry_host: "{{ hostvars[master_node_name]['ansible_host'] | default(hostvars[master_node_name]['inventory_hostname']) }}"
@@ -11,7 +12,7 @@
     
     # 架构师避坑逻辑：仅在 node1 上使用特定的 venv 解释器
     # 这样即使 node2/node3 没有这个 venv，脚本也不会报错
-    custom_python: "{{ (inventory_hostname == 'node1') | ternary('/home/metaxadmin/venv/bin/python3', '/usr/bin/python3') }}"
+    custom_python: "{{ (inventory_hostname == 'node1') | ternary(venv_path, '/usr/bin/python3') }}"
 
   tasks:
     # 任务 1：创建目录（注意独立横杠）

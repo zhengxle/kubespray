@@ -93,3 +93,21 @@
         path: /etc/ssh/ssh_config
         line: "    ServerAliveInterval 60"
         state: present
+    ## --- 6. 为第一个 Master (Registry 节点) 安装管理库 ---
+    - name: Install kubernetes python library on first master
+      pip:
+        name:
+          - kubernetes
+          - PyYAML
+        state: present
+        # 使用渲染后的变量
+        executable: "{{ venv_pip_path }}"
+      vars:
+        # 在这里显式定义变量，Ansible 会先将其渲染为 /home/metaxadmin/venv/bin/pip
+        venv_pip_path: "/home/{{ ansible_user }}/venv/bin/pip"
+        system_pip_path: "/usr/bin/pip3"
+        # 逻辑判断：node1 用 venv，其他用系统 pip
+        target_pip: "{{ (inventory_hostname == 'node1') | ternary(venv_pip_path, system_pip_path) }}"
+      # 将渲染后的结果传给 executable
+      register: pip_install_result
+      when: inventory_hostname == groups['kube_control_plane'][0]

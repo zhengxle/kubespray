@@ -1,124 +1,78 @@
 #!/usr/bin/env python3
-'''
-Ansible dynamic inventory script.
-
-This script generates an Ansible inventory by scanning a specified directory
-(hostvars_dir) for filenames.
-
-    usage: build-inventory.py [-h] [-d HOSTVARS_DIR] [--list | --host HOST]
-'''
-
 import os
-import argparse
-import json
 import sys
 
-def get_inventory():
-    '''Builds and returns the Ansible inventory structure.
-
-    Initializes a base inventory and populates 'masters' and 'workers' groups
-    by listing files in the directory specified by the globally defined `args.hostvars_dir`.
-    All filenames found are added as keys to `_meta.hostvars` with an empty
-    dictionary, registering them as hosts.
-
-    Returns:
-        dict: A dictionary representing the Ansible inventory.
-    '''
-    inventory = {
-            'all': {
-                'children': [
-                    'ungrouped',
-                    'nodes',
-                    'bastions',
-                    'vm_hosts'
-                ]
-            },
-            'nodes': {
-                'children': [
-                    'masters'
-                ]
-            },
-            'masters': {
-                'hosts': []
-            },
-            'bastions': {
-                'hosts': [
-                    'bastion'
-                ]
-            },
-            'hypervisors': {
-                'hosts': [
-                    'hypervisor'
-                ]
-            },
-            'vm_hosts': {
-                'children': [
-                    'hypervisors'
-                ]
-            },
-            "_meta": {
-                "hostvars": {
-            },
-        }
-    }
-    workers = {'hosts': [] }
-
-    for filename in os.listdir(args.hostvars_dir):
-        inventory['_meta']["hostvars"][filename] =  {}
-
-        if filename.startswith('master'):
-            inventory['masters']['hosts'].append(filename)
-
-        elif filename.startswith('worker') and os.path.isfile(os.path.join(args.hostvars_dir, filename)):
-            workers['hosts'].append(filename)
-
-    if workers['hosts']:
-        inventory['workers'] = workers
-        inventory["nodes"]["children"].append("workers")
-
-    return inventory
-
-def get_host_vars(hostname, inventory_data):
-    '''Retrieves host-specific variables for a given hostname.
-
-        Args:
-            hostname (str): The name of the host.
-            inventory_data (dict): The complete inventory data structure,
-            which should contain a `_meta.hostvars` section.
-
-        Returns:
-            dict: A dictionary of variables for the host. Returns an empty
-                dictionary if the host is not found or has no variables
-                defined in `_meta.hostvars`.
-    '''
-    return inventory_data.get("_meta", {}).get("hostvars", {}).get(hostname, {})
+def scale_rules(node_count):
+    if node_count == 1:
+        return 1, 1
+    elif node_count == 2:
+        return 1, 2
+    elif node_count == 3:
+        return 3, 3
+    else:
+        return 3, 3
 
 def main():
-    inventory_data = get_inventory()
-
-    if args.list:
-        print(json.dumps(inventory_data, indent=2))
-
-    elif args.host:
-        host_vars = get_host_vars(args.host, inventory_data)
-        print(json.dumps(host_vars, indent=2))
-    else:
-        print(json.dumps(inventory_data, indent=2))
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Ansible Dynamic Inventory")
-    parser.add_argument('-d', '--hostvars_dir', default="./host_vars/", help="Path to the inventory directory")
-    parser.add_argument('--list', action='store_true', help="List all groups and hosts")
-    parser.add_argument('--host', help="Get all the variables about a specific host")
-    args = parser.parse_args()
-    
-    if os.environ.get("HOSTVAR_DIR"):
-        args.hostvars_dir = os.environ.get("HOSTVAR_DIR")
-
-    if os.path.exists(args.hostvars_dir) and os.path.isdir(args.hostvars_dir):
-        pass
-    else:
-        print(f"Host variables directory '{args.hostvars_dir}' does not exist or is not a directory.")
+    ips = sys.argv[1:]
+    if not ips:
+        print("Usage: inventory.py <IP1> <IP2> ...")
         sys.exit(1)
 
+    config_file = os.environ.get('CONFIG_FILE', './hosts.yml')
+    config_dir = os.path.dirname(config_file)
+    if config_dir and not os.path.exists(config_dir):
+        os.makedirs(config_dir)
+
+    node_count = len(ips)
+    master_count, etcd_count = scale_rules(node_count)
+
+    # 1. 采用流式字符串构建，精确控制每一行的输出顺序与缩进
+    lines = []
+    
+    # --- children 区域 ---
+    lines.append("all:")
+    lines.append("  children:")
+    
+    lines.append("    calico_rr:")
+    lines.append("      hosts: {}")
+    
+    lines.append("    etcd:")
+    lines.append("      hosts:")
+    for i in range(1, etcd_count + 1):
+        lines.append(f"        node{i}: {{}}")
+        
+    lines.append("    k8s_cluster:")
+    lines.append("      children:")
+    lines.append("        kube_control_plane: {}")
+    lines.append("        kube_node: {}")
+    
+    lines.append("    kube_control_plane:")
+    lines.append("      hosts:")
+    for i in range(1, master_count + 1):
+        lines.append(f"        node{i}: {{}}")
+        
+    lines.append("    kube_node:")
+    lines.append("      hosts:")
+    for i in range(1, node_count + 1):
+        lines.append(f"        node{i}: {{}}")
+
+    # --- hosts 区域 ---
+    lines.append("  hosts:")
+    for i, ip in enumerate(ips, start=1):
+        lines.append(f"    node{i}:")
+        # 严格按照你右侧截图的变量顺序输出
+        lines.append(f"      ansible_host: {ip}")
+        lines.append(f"      ip: {ip}")
+        lines.append(f"      access_ip: {ip}")
+        lines.append("      ansible_user: metaxadmin")
+        lines.append("      ansible_password: '!QAZ2wsx'")
+        lines.append("      ansible_become_password: '!QAZ2wsx'")
+
+    # 2. 写入文件
+    with open(config_file, 'w', encoding='utf-8') as f:
+        f.write("\n".join(lines) + "\n")
+
+    print(f"--> [Success] Generated strict-ordered inventory at: {config_file}")
+
+if __name__ == "__main__":
     main()

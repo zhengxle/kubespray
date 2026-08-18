@@ -1,0 +1,66 @@
+---
+- name: "测试 2: 显存及 P2P 传输带宽测试"
+  shell: /opt/maca/bin/mxvs p2p --src-devices all --dst-devices all --unidirection | col -b | tail -n 62
+  register: test_mem
+  ignore_errors: yes
+
+- name: "打印p2p传输带宽测试结果"
+  debug:
+    var: test_mem.stdout_lines
+
+- name: "校验 P2P 拓扑与传输性能"
+  shell: |
+    python3 -c '
+    import sys, re
+
+    raw_text = """{{ test_mem.stdout }}"""
+    clean_lines = []
+    for line in raw_text.splitlines():
+        if "\r" in line:
+            clean_lines.append(line.split("\r")[-1])
+        else:
+            clean_lines.append(line)
+
+    full_output = "\n".join(clean_lines)
+    print("=== 完整测试输出 ===")
+    print(full_output)
+    print("====================")
+
+    # 2. 设置带宽阈值 (GB/s)
+    METAXLINK_THRESHOLD = 45.0  # MetaX Link 预期 > 45 GB/s
+    PCIE_THRESHOLD = 30.0       # PCIe P2P 预期 > 30 GB/s
+
+    failed_links = []
+    total_links = 0
+
+    # 正则匹配数据行: GPU#0  GPU#1  metaxlink/pcie  SIZE  EFFECTIVE_BW  ...
+    pattern = re.compile(r"GPU#(\d+)\s+GPU#(\d+)\s+(\w+)\s+\d+\s+([\d\.]+)\s+GB/s\s+([\d\.]+)\s+GB/s")
+
+    for line in clean_lines:
+        match = pattern.search(line)
+        if match:
+            print(match.groups())
+            src, dst, topo, eff_bw, raw_bw = match.groups()
+            eff_bw = float(eff_bw)
+            raw_bw = float(raw_bw)
+            total_links += 1
+
+            # 根据拓扑类型校验带宽阈值
+            if topo == "metaxlink" and eff_bw < METAXLINK_THRESHOLD:
+                failed_links.append(f"GPU#{src} -> GPU#{dst} ({topo}): {eff_bw} GB/s < 阈值 {METAXLINK_THRESHOLD} GB/s")
+            elif topo == "pcie" and eff_bw < PCIE_THRESHOLD:
+                failed_links.append(f"GPU#{src} -> GPU#{dst} ({topo}): {eff_bw} GB/s < 阈值 {PCIE_THRESHOLD} GB/s")
+
+    if total_links == 0:
+        print("❌ [FAIL] 未能正确解析到任何 P2P 传输链路数据！")
+        sys.exit(1)
+    if failed_links:
+        print(f"❌ [FAIL] 检测到 {len(failed_links)} 条链路带宽未达标:")
+        for err in failed_links:
+            print(f"  - {err}")
+        sys.exit(1)
+    else:
+        print(f"✅ [PASS] 所有 {total_links} 条 P2P 链路带宽校验通过！")
+    '
+  register: p2p_eval_res
+  ignore_errors: yes

@@ -1,0 +1,6 @@
+---
+- name: 沐曦 GPU 节点集群状态巡检与压测
+  hosts: kube_node:k8s_cluster  # 匹配 Kubespray 默认的 GPU 节点组
+  become: yes
+  roles:
+    - role: metax_gpu_check

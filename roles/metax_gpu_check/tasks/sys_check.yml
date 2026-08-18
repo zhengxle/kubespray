@@ -1,0 +1,20 @@
+---
+- name: "创建巡检日志目录"
+  file:
+    path: /var/log/metax_check
+    state: directory
+    mode: '0755'
+
+- name: "收集 CPU / 内存 / 磁盘与系统信息"
+  shell: |
+    echo "=== CPU Info ===" > /var/log/metax_check/sys_info.log
+    lscpu | egrep "Model name|Socket\(s\)|NUMA node\(s\)" >> /var/log/metax_check/sys_info.log
+    sudo dmidecode -t processor | grep -i "max speed" >> /var/log/metax_check/sys_info.log
+
+    echo "=== Memory Info ===" >> /var/log/metax_check/sys_info.log
+    sudo dmidecode -t memory | grep "Part Number" >> /var/log/metax_check/sys_info.log
+
+    echo "=== OS & Kernel Info ===" >> /var/log/metax_check/sys_info.log
+    cat /etc/os-release >> /var/log/metax_check/sys_info.log
+    uname -r >> /var/log/metax_check/sys_info.log
+  ignore_errors: yes

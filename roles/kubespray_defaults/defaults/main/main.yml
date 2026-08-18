@@ -33,6 +33,10 @@ kube_version_min_required: "{{ (kubelet_checksums['amd64'] | dict2items)[-1].key
 ## Kube Proxy mode One of ['ipvs', 'iptables', 'nftables']
 kube_proxy_mode: ipvs
 
+# When true, kubeadm skips the kube-proxy addon (for example Cilium kube-proxy replacement).
+# Node and package tasks that exist only for kube-proxy also honor this (IPVS/nftables modules, ipvsadm, strict_arp checks).
+kube_proxy_remove: false
+
 # Debugging option for the kubeadm config validate command
 # Set to false only for development and testing scenarios where validation is expected to fail (pre-release Kubernetes versions, etc.)
 kubeadm_config_validate_enabled: true
@@ -232,6 +236,10 @@ cilium_deploy_additionally: false
 #   - --identity-allocation-mode=kvstore
 #   - Ref: https://docs.cilium.io/en/stable/internals/cilium_operator/#kvstore-operations
 cilium_identity_allocation_mode: crd
+
+# The default IP address management mode is "Cluster Scope".
+# https://docs.cilium.io/en/stable/concepts/networking/ipam/
+cilium_ipam_mode: cluster-pool
 
 # Determines if calico_rr group exists
 peer_with_calico_rr: "{{ 'calico_rr' in groups and groups['calico_rr'] | length > 0 }}"
@@ -642,12 +650,12 @@ local_volume_provisioner_storage_classes: |
 
 ssl_ca_dirs: |-
   [
-  {% if ansible_os_family in ['Flatcar', 'Flatcar Container Linux by Kinvolk'] -%}
+  {% if ansible_facts['os_family'] in ['Flatcar', 'Flatcar Container Linux by Kinvolk'] -%}
   '/usr/share/ca-certificates',
-  {% elif ansible_os_family == 'RedHat' -%}
+  {% elif ansible_facts['os_family'] == 'RedHat' -%}
   '/etc/pki/tls',
   '/etc/pki/ca-trust',
-  {% elif ansible_os_family == 'Debian' -%}
+  {% elif ansible_facts['os_family'] == 'Debian' -%}
   '/usr/share/ca-certificates',
   {% endif -%}
   ]
@@ -655,7 +663,6 @@ ssl_ca_dirs: |-
 # used for delegating tasks on a working control plane node
 first_kube_control_plane: "{{ groups['kube_control_plane'] | first }}"
 # Vars for pointing to kubernetes api endpoints
-kube_apiserver_count: "{{ groups['kube_control_plane'] | length }}"
 kube_apiserver_address: "{{ hostvars[inventory_hostname]['main_ip'] }}"
 kube_apiserver_access_address: "{{ hostvars[inventory_hostname]['main_access_ip'] }}"
 first_kube_control_plane_address: "{{ hostvars[groups['kube_control_plane'][0]]['main_access_ip'] }}"
@@ -748,10 +755,10 @@ _host_architecture_groups:
   aarch64: arm64
   armv7l: arm
 host_architecture: >-
-  {%- if ansible_architecture in _host_architecture_groups -%}
-  {{ _host_architecture_groups[ansible_architecture] }}
+  {%- if ansible_facts['architecture'] in _host_architecture_groups -%}
+  {{ _host_architecture_groups[ansible_facts['architecture']] }}
   {%- else -%}
-  {{ ansible_architecture }}
+  {{ ansible_facts['architecture'] }}
   {%- endif -%}
 
 _host_os_groups:
@@ -759,10 +766,10 @@ _host_os_groups:
   Darwin: darwin
   Win32NT: windows
 host_os: >-
-  {%- if ansible_system in _host_os_groups -%}
-  {{ _host_os_groups[ansible_system] }}
+  {%- if ansible_facts['system'] in _host_os_groups -%}
+  {{ _host_os_groups[ansible_facts['system']] }}
   {%- else -%}
-  {{ ansible_system }}
+  {{ ansible_facts['system'] }}
   {%- endif -%}
 
 # Sets the eventRecordQPS parameter in kubelet-config.yaml.
@@ -801,6 +808,7 @@ sysctl_ignore_unknown_keys: false
 
 system_upgrade: false
 system_upgrade_reboot: on-upgrade  # never, always
+system_upgrade_autoclean: false
 
 # Enables or disables the scheduler plugins.
 scheduler_plugins_enabled: false
@@ -816,7 +824,7 @@ ntp_enabled: false
 # The default is ntp for most platforms, or chrony on RHEL/CentOS 7 and later.
 # The ntp_package can be one of ['ntp', 'ntpsec', 'chrony']
 ntp_package: >-
-      {% if ansible_os_family == "RedHat" -%}
+      {% if ansible_facts['os_family'] == "RedHat" -%}
       chrony
       {%- else -%}
       ntp

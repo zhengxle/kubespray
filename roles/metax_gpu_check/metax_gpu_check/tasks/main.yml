@@ -1,0 +1,36 @@
+---
+- name: "1. 执行系统基础检查"
+  import_tasks: sys_check.yml
+  tags:
+    - sys
+    - all_check
+
+- name: "2. 执行基本算力测试与阈值校验"
+  import_tasks: ops_check.yml
+  tags:
+    - ops
+    - all_check
+
+- name: "3. 执行显存测试"
+  import_tasks: p2p_check.yml
+  tags:
+    - p2p
+    - all_check
+
+- name: "4. 执行pcie显存测试"
+  import_tasks: pcie_check.yml
+  tags:
+    - pcie
+    - all_check
+
+
+- name: "5. 执行MCCL带宽测试"
+  import_tasks: mccl_check.yml
+  tags:
+    - mccl
+    - all_check
+
+- name: "6. 汇总测试结果并生成报告"
+  import_tasks: summary.yml
+  tags:
+    - always

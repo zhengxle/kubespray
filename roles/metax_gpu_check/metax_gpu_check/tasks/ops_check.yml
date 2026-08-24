@@ -1,0 +1,58 @@
+---
+- name: "执行基本算力测试 (mxvs ops)"
+  shell: /opt/maca/bin/mxvs ops
+  register: test_ops_output
+  ignore_errors: yes
+
+- name: "打印算力测试结果"
+  debug:
+    var: test_ops_output.stdout_lines
+
+- name: "精准校验 8 卡各项算力阈值"
+  shell: |
+    python3 -c '
+    import sys, re
+
+    THRESHOLDS = {
+        "int8": 470.0,
+        "bf16": 239.0,
+        "fp16_matrix": 239.0,
+        "fp32_vector": 14.0,
+        "fp32_matrix": 29.0,
+        "tf32": 119.0
+    }
+
+    raw_text = """{{ test_ops_output.stdout }}"""
+    lines = raw_text.splitlines()
+
+    boards_found = set()
+    metrics_checked = 0
+
+    pattern = re.compile(r"^\s*(\d+)\s+[\da-fA-F:\.]+\s+([a-zA-Z0-9_]+)\s+([\d\.]+)")
+
+    for line in lines:
+        match = pattern.match(line)
+        if match:
+            board_id, model, val_str = match.groups()
+            val = float(val_str)
+            boards_found.add(board_id)
+
+            if model in THRESHOLDS:
+                threshold = THRESHOLDS[model]
+                if val < threshold:
+                    print(f"FAIL: GPU {board_id} 的 {model} 算力为 {val}，低于阈值 {threshold}")
+                    sys.exit(1)
+                metrics_checked += 1
+
+    if len(boards_found) < 8:
+        print(f"FAIL: 仅检测到 {len(boards_found)} 张 GPU 卡")
+        sys.exit(1)
+
+    if metrics_checked < 8 * len(THRESHOLDS):
+        print(f"FAIL: 算力测试项未完全覆盖")
+        sys.exit(1)
+
+    print("ALL_PASS")
+    '
+  register: ops_eval_res
+  ignore_errors: yes

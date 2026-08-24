@@ -1,0 +1,16 @@
+---
+- name: "整理节点测试结果"
+  set_fact:
+    check_results:
+      "基础系统诊断": "{{ 'PASS' if (sys_eval_res.rc is defined and sys_eval_res.rc == 0) else ('SKIP' if (sys_eval_res is defined and sys_eval_res is skipped) else 'FAIL') }}"
+      "基本算力测试": "{{ 'PASS' if (ops_eval_res.rc is defined and ops_eval_res.rc == 0 and 'ALL_PASS' in (ops_eval_res.stdout | default(''))) else ('SKIP' if (ops_eval_res is defined and ops_eval_res is skipped) else 'FAIL') }}"
+      "P2P带宽测试": "{{ 'PASS' if (p2p_eval_res.rc is defined and p2p_eval_res.rc == 0 and 'ALL_PASS' in (p2p_eval_res.stdout | default(''))) else ('SKIP' if (p2p_eval_res is defined and p2p_eval_res is skipped) else 'FAIL') }}"
+      "PCIe带宽测试": "{{ 'PASS' if (pcie_eval_res.rc is defined and pcie_eval_res.rc == 0 and 'ALL_PASS' in (pcie_eval_res.stdout | default(''))) else ('SKIP' if (pcie_eval_res is defined and pcie_eval_res is skipped) else 'FAIL') }}"
+      "MetaxLink带宽测试": "{{ 'PASS' if (test_mccl.rc is defined and test_mccl.rc == 0) else ('SKIP' if (test_mccl is defined and test_mccl is skipped) else 'FAIL') }}"
+
+- name: "生成集群 HTML 汇总测试报告"
+  template:
+    src: cluster_report.html.j2
+    dest: "{{ playbook_dir }}/cluster_test_report.html"
+  delegate_to: localhost
+  run_once: true

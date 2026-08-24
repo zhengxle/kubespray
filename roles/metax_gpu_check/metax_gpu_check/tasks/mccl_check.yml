@@ -1,0 +1,121 @@
+---
+- name: "测试 5: 执行 MetaX Link (MCCL) 带宽与算子巡检"
+  shell: bash /opt/maca/samples/mccl_tests/perf/mccl.sh 8 all
+  register: mccl_res
+  ignore_errors: yes
+
+- name: "打印 MCCL 测试结果"
+  debug:
+    var: mccl_res.stdout_lines
+
+- name: "提取并自动校验 MCCL 测试结果"
+  shell: |
+    python3 -c '
+    raw_text = """{{ mccl_res.stdout }}"""
+    # 各算子在 1GB (1073741824 Bytes) 时的最低 algbw 预期门槛
+    EXPECTED_PEAK_ALGBW = {
+        "all_reduce_perf": 36.0,
+        "all_gather_perf": 73.0,
+        "reduce_scatter_perf": 72.0,
+        "alltoall_perf": 18.71
+    }
+
+    import sys
+
+    EXPECTED_PEAK_ALGBW = {
+        "all_reduce_perf": 36.0,
+        "all_gather_perf": 73.0,
+        "reduce_scatter_perf": 72.0,
+        "alltoall_perf": 18.71
+    }
+
+    raw_sections = raw_text.split("The test is ")
+    errors = []
+
+    for sec in raw_sections:
+        if not sec.strip():
+            continue
+
+        test_name = sec.split(",")[0].strip()
+        lines = sec.splitlines()
+
+        # 用于记录当前子测试的列位置
+        algbw_idx = None
+        busbw_idx = None
+        wrong_idx = None
+
+        prev_algbw = -1.0
+        prev_busbw = -1.0
+        peak_1g_algbw = None
+
+        for line in lines:
+            line_str = line.strip()
+            if not line_str:
+                continue
+
+            # 1. 动态抓取表头，获取索引位置
+            if "size" in line_str and "algbw" in line_str:
+                # 清理开头的 # 号并按空白字符分割
+                headers = line_str.lstrip("#").split()
+                if "algbw" in headers:
+                    algbw_idx = headers.index("algbw")
+                if "busbw" in headers:
+                    busbw_idx = headers.index("busbw")
+                if "#wrong" in headers:
+                    wrong_idx = headers.index("#wrong")
+                continue
+
+            # 忽略其他非数据注释行
+            if line_str.startswith("#"):
+                continue
+
+            parts = line_str.split()
+            # 只要第一列是数字 size，且我们已经找到了表头索引
+            if parts and parts[0].isdigit() and algbw_idx is not None:
+                size_b = int(parts[0])
+
+                try:
+                    algbw = float(parts[-7])
+                    busbw = float(parts[-6])
+                    wrong = parts[-5]
+                except (IndexError, ValueError):
+                    continue
+
+                # 1. 校验错误包 #wrong 是否为 0 或 N/A
+                if wrong not in ["0", "N/A", "0.00", "0e+00"]:
+                    errors.append(f"[{test_name}] Size={size_b}B 出现数据校验错误: #wrong={wrong}")
+
+                # 2. 校验趋势递增 (允许 5% 内的微小波动)
+                if prev_algbw > 0 and algbw < prev_algbw * 0.95:
+                    errors.append(f"[{test_name}] Size={size_b}B 算法带宽下降异常: {algbw} GB/s < 前值 {prev_algbw} GB/s")
+                if prev_busbw > 0 and busbw < prev_busbw * 0.95:
+                    errors.append(f"[{test_name}] Size={size_b}B 总线带宽下降异常: {busbw} GB/s < 前值 {prev_busbw} GB/s")
+
+                prev_algbw = algbw
+                prev_busbw = busbw
+
+                # 记录 1GB (1073741824 Bytes) 时的 algbw
+                if size_b == 1073741824:
+                    peak_1g_algbw = algbw
+        # 3. 校验 1GB 峰值带宽门槛
+        if test_name in EXPECTED_PEAK_ALGBW:
+            threshold = EXPECTED_PEAK_ALGBW[test_name]
+            if peak_1g_algbw is None:
+                errors.append(f"[{test_name}] 未解析到 Size=1073741824 (1GB) 的测试数据！")
+            elif peak_1g_algbw < threshold:
+                errors.append(f"[{test_name}] 1GB 算法带宽不达标: {peak_1g_algbw} GB/s < 阈值 {threshold} GB/s")
+
+    if errors:
+        print("❌ [FAIL] MCCL 性能巡检未通过，检测到以下异常:")
+        for err in errors:
+            print(f"  - {err}")
+        sys.exit(1)
+    else:
+        print("✅ [PASS] MCCL 所有算子测试通过！错误包均为 0，带宽递增趋势正常，1GB 峰值带宽全部达标。")
+    '
+  register: mccl_eval_res
+  ignore_errors: yes
+
+- name: "展示 MCCL 巡检最终结果"
+  debug:
+    var: mccl_eval_res.stdout_lines

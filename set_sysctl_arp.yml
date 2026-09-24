@@ -1,0 +1,28 @@
+---
+- name: 批量设置 ARP 忽略与响应内核参数 (开机永久生效)
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    sysctl_conf_path: /etc/sysctl.d/99-custom.conf
+
+  tasks:
+    - name: 确保 /etc/sysctl.d/99-custom.conf 文件存在并写入 ARP 参数
+      blockinfile:
+        path: "{{ sysctl_conf_path }}"
+        create: true
+        mode: '0644'
+        marker: "# {mark} ANSIBLE MANAGED BLOCK (ARP CONFIG)"
+        block: |
+          net.ipv4.conf.all.arp_ignore = 1
+          net.ipv4.conf.all.arp_announce = 2
+          net.ipv4.conf.default.arp_ignore = 1
+          net.ipv4.conf.default.arp_announce = 2
+      notify: Apply sysctl settings
+
+  handlers:
+    - name: Apply sysctl settings
+      command: sysctl --system
+      register: sysctl_result
+      changed_when: sysctl_result.rc == 0

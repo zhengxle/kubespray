@@ -1,0 +1,27 @@
+---
+- name: 生成 GPU 节点动态 inventory
+  hosts: localhost
+  gather_facts: no
+  connection: local
+  vars:
+    csv_file: "server_ip_sn_mapping.csv"
+    connect_ip_field: "Business_IP"
+  tasks:
+    - name: 读取 CSV
+      read_csv:
+        path: "{{ csv_file }}"
+        delimiter: ","
+      register: csv_data
+
+    - name: 筛选智算服务器
+      set_fact:
+        gpu_hosts: "{{ csv_data.list | selectattr('Hostname', 'match', '^智算服务器-') | list }}"
+
+    - name: 生成 inventory 文件
+      copy:
+        dest: "generated_inventory.ini"
+        content: |
+          [gpu_nodes]
+          {% for h in gpu_hosts %}
+          {{ h.Business_IP }} ansible_host={{ h.Business_IP }} ansible_user=ubuntu ansible_password='Server@123.' ansible_become_password='Server@123.' new_hostname=gpu-node-{{ h.Hostname.split('-')[-1] }} old_hostname={{ h.Hostname }}
+          {% endfor %}

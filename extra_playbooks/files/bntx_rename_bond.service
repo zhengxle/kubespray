@@ -1,0 +1,13 @@
+[Unit]
+Description=Rename RDMA Devices based on Netdev Mapping
+Wants=network-online.target
+After=network-online.target rdma.service openibd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bntx_rename_bond.sh
+RemainAfterExit=yes
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

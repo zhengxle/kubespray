@@ -1,0 +1,60 @@
+---
+# 1. 配置 Ubuntu 镜像
+- name: 1. Setup Ubuntu Mirror
+  import_playbook: setup_ubuntu_mirror.yml
+
+# 2. 禁用 APT 自动更新
+- name: 2. Disable APT Auto Update
+  import_playbook: disable_apt_auto_update.yml
+
+# 3. 设置默认内核
+- name: 3. Set Default Kernel
+  import_playbook: set_default_kernel.yml
+
+# 4. 清理 APT 锁 (Ad-hoc 命令转换为 Task)
+- name: 4. Clean APT Locks and Processes
+  hosts: all
+  become: true
+  tasks:
+    - name: Kill apt/dpkg processes and remove lock files
+      ansible.builtin.shell: |
+        killall -9 dpkg apt apt-get 2>/dev/null || true
+        rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock*
+      changed_when: false
+
+# 5. 修复 Shim
+- name: 5. Fix Shim
+  import_playbook: fix_shim.yml
+
+# 6. 检查 Kernel 版本
+- name: 6. Check Kernel Version
+  hosts: all
+  become: false
+  tasks:
+    - name: Get running kernel release
+      ansible.builtin.command: uname -r
+      register: kernel_version
+      changed_when: false
+
+    - name: Display Kernel Version
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} kernel version is {{ kernel_version.stdout }}"
+
+# 7. 配置 NFS
+- name: 7. Setup NFS
+  import_playbook: setup_nfs.yml
+
+# 8. 检查 NFS 挂载
+- name: 8. Check NFS Mounts
+  hosts: all
+  become: true
+  tasks:
+    - name: Check nfs_data mount status
+      ansible.builtin.shell: df -T | grep nfs_data
+      register: nfs_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display NFS Mount Result
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} NFS status: {{ nfs_check.stdout if nfs_check.rc == 0 else 'NOT MOUNTED' }}"

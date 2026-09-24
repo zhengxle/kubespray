@@ -1,0 +1,26 @@
+- name: 配置 Netplan DNS 服务器
+  hosts: kube_node
+  become: true
+  tasks:
+    - name: 修复配置文件权限为 0600 (Netplan 硬性要求)
+      ansible.builtin.file:
+        path: /etc/netplan/01-network-manager-all.yaml
+        mode: '0600'
+
+    - name: 精准定位网关配置并插入 DNS
+      ansible.builtin.blockinfile:
+        path: /etc/netplan/01-network-manager-all.yaml
+        # 精准匹配 via: 172.17.0.251 这一行
+        insertafter: '^\s*via:\s*172\.17\.0\.251'
+        marker: "# {mark} ANSIBLE MANAGED BLOCK (DNS)"
+        # block 内部每行开头必须有 6 个空格！
+        block: |
+              nameservers:
+                addresses:
+                  - 114.114.114.114
+                  - 8.8.8.8
+      notify: Apply netplan
+
+  handlers:
+    - name: Apply netplan
+      ansible.builtin.command: netplan apply

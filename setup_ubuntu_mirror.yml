@@ -1,0 +1,37 @@
+---
+- name: Replace Ubuntu apt source with Tsinghua mirror
+  hosts: kube_node
+  become: true
+  gather_facts: true
+
+  vars:
+    ubuntu_codename: jammy
+    tsinghua_mirror: "https://mirrors.tuna.tsinghua.edu.cn/ubuntu"
+
+  tasks:
+    - name: Backup current sources.list
+      copy:
+        src: /etc/apt/sources.list
+        dest: /etc/apt/sources.list.bak
+        remote_src: true
+        force: false
+
+    - name: Replace sources.list with Tsinghua mirror
+      copy:
+        content: |
+          # 默认注释了源码镜像以提高 apt update 速度
+          deb {{ tsinghua_mirror }}/ {{ ubuntu_codename }} main restricted universe multiverse
+          # deb-src {{ tsinghua_mirror }}/ {{ ubuntu_codename }} main restricted universe multiverse
+          deb {{ tsinghua_mirror }}/ {{ ubuntu_codename }}-updates main restricted universe multiverse
+          # deb-src {{ tsinghua_mirror }}/ {{ ubuntu_codename }}-updates main restricted universe multiverse
+          deb {{ tsinghua_mirror }}/ {{ ubuntu_codename }}-backports main restricted universe multiverse
+          # deb-src {{ tsinghua_mirror }}/ {{ ubuntu_codename }}-backports main restricted universe multiverse
+          deb {{ tsinghua_mirror }}/ {{ ubuntu_codename }}-security main restricted universe multiverse
+          # deb-src {{ tsinghua_mirror }}/ {{ ubuntu_codename }}-security main restricted universe multiverse
+        dest: /etc/apt/sources.list
+        backup: true
+
+    - name: Update apt cache with new mirror
+      apt:
+        update_cache: true
+        cache_valid_time: 0

@@ -1,0 +1,15 @@
+- hosts: kube_node
+  become: true
+  tasks:
+    - name: 安装 NFS 客户端依赖
+      ansible.builtin.package:
+        name: nfs-common
+        state: present
+
+    - name: 创建挂载目录并挂载 NFS
+      ansible.posix.mount:
+        path: /mnt/nfs_data
+        src: "172.17.0.1:/storage/data1"
+        fstype: nfs
+        opts: "defaults,_netdev"
+        state: mounted

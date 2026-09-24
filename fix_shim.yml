@@ -1,0 +1,44 @@
+---
+- name: 修复 shim-signed ESP 挂载并完成 dpkg 配置
+  hosts: all
+  become: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  tasks:
+    - name: 检查 /boot/efi 是否已挂载
+      command: mountpoint -q /boot/efi
+      register: efi_mounted
+      ignore_errors: yes
+
+    - name: 尝试自动挂载 /boot/efi
+      mount:
+        path: /boot/efi
+        state: mounted
+      when: efi_mounted.rc != 0
+      ignore_errors: yes
+
+    - name: 强制清理死锁的 apt/dpkg/debconf 进程
+      shell: |
+        # 查找占用 dpkg 锁或 debconf 数据库的 PID
+        PIDS=$(fuser /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat 2>/dev/null | xargs)
+        if [ -n "$PIDS" ]; then
+          echo "发现占用锁的进程: $PIDS，尝试 Kill 释放..."
+          kill -15 $PIDS 2>/dev/null || true
+          sleep 5
+          # 如果 3 秒后依然没退出，强行 -9 杀掉
+          kill -9 $PIDS 2>/dev/null || true
+        fi
+        # 移除可能残留的锁文件（仅在进程已死的情况下安全）
+        rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat.lock
+      ignore_errors: yes
+
+    - name: 动态获取 ESP 分区并预设 debconf
+      shell: |
+        ESP_DEV=$(df /boot/efi | tail -n1 | awk '{print $1}')
+        if [ -n "$ESP_DEV" ]; then
+          echo "grub-efi-amd64 grub-efi/install_devices string $ESP_DEV" | debconf-set-selections
+        fi
+        echo "grub-pc grub-pc/install_devices_empty boolean true" | debconf-set-selections
+
+    - name: 重新执行 dpkg 配置
+      command: dpkg --configure -a --force-confold --force-confdef

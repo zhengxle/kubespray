@@ -1,0 +1,67 @@
+---
+- name: 批量修改智算服务器主机名 (智算服务器-XXX -> gpu-node-XXX)
+  hosts: kube_node
+  gather_facts: no
+  vars:
+    csv_file: "server_ip_sn_mapping.csv"
+    # 连接方式：business_ip 或 bmc_ip
+    connect_ip_field: "Business_IP"
+    # 远程用户
+    ansible_user: "root"
+    ansible_password: "YourPassword"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+  tasks:
+    - name: 读取 CSV 文件
+      read_csv:
+        path: "{{ csv_file }}"
+        delimiter: ","
+      register: csv_data
+      delegate_to: kube_node
+
+    - name: 筛选出智算服务器并构建主机列表
+      set_fact:
+        gpu_hosts: >-
+          {{
+            csv_data.list
+            | selectattr('Hostname', 'match', '^智算服务器-')
+            | list
+          }}
+
+    - name: 显示将要处理的主机数量
+      debug:
+        msg: "共找到 {{ gpu_hosts | length }} 台智算服务器"
+
+    - name: 动态添加主机到 inventory
+      add_host:
+        name: "{{ item[connect_ip_field] }}"
+        groups: gpu_nodes
+        ansible_host: "{{ item[connect_ip_field] }}"
+        ansible_user: "{{ ansible_user }}"
+        ansible_password: "{{ ansible_password }}"
+        ansible_ssh_common_args: "{{ ansible_ssh_common_args }}"
+        new_hostname: "gpu-node-{{ item.Hostname.split('-')[-1] }}"
+        old_hostname: "{{ item.Hostname }}"
+      loop: "{{ gpu_hosts }}"
+      when: item[connect_ip_field] is defined and item[connect_ip_field] | length > 0
+
+- name: 修改主机名
+  hosts: gpu_nodes
+  gather_facts: no
+  become: yes
+  tasks:
+    - name: 设置新主机名 (hostnamectl)
+      hostname:
+        name: "{{ new_hostname }}"
+      register: hostname_result
+
+    - name: 更新 /etc/hosts 中的旧主机名
+      replace:
+        path: /etc/hosts
+        regexp: "{{ old_hostname }}"
+        replace: "{{ new_hostname }}"
+      ignore_errors: yes
+
+    - name: 显示修改结果
+      debug:
+        msg: "{{ inventory_hostname }} : {{ old_hostname }} -> {{ new_hostname }}"

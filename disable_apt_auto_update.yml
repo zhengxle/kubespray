@@ -1,0 +1,73 @@
+---
+# Playbook: 彻底关闭系统 APT 自动更新功能
+# 用途：
+#   1. 停止并禁用 unattended-upgrades 服务及 apt-daily 定时器
+#   2. 重置 /etc/apt/apt.conf.d/10periodic 和 20auto-upgrades 配置文件
+# 使用方法：
+#   ansible-playbook -i inventory disable_apt_auto_update.yml
+
+- name: 彻底关闭系统 APT 自动更新功能
+  hosts: kube_node
+  become: true
+  tasks:
+
+    - name: 停止并禁用 unattended-upgrades 服务
+      ansible.builtin.systemd:
+        name: unattended-upgrades
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: 停止并禁用 systemd apt-daily 定时器和服务
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - apt-daily.service
+        - apt-daily.timer
+        - apt-daily-upgrade.service
+        - apt-daily-upgrade.timer
+      ignore_errors: true
+
+    - name: 覆盖配置 /etc/apt/apt.conf.d/10periodic
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/10periodic
+        content: |
+          APT::Periodic::Update-Package-Lists "0";
+          APT::Periodic::Download-Upgradeable-Packages "0";
+          APT::Periodic::AutocleanInterval "0";
+          APT::Periodic::Unattended-Upgrade "0";
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: 覆盖配置 /etc/apt/apt.conf.d/20auto-upgrades
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        content: |
+          APT::Periodic::Update-Package-Lists "0";
+          APT::Periodic::Download-Upgradeable-Packages "0";
+          APT::Periodic::AutocleanInterval "0";
+          APT::Periodic::Unattended-Upgrade "0";
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: 显示 10periodic 配置内容
+      ansible.builtin.command: cat /etc/apt/apt.conf.d/10periodic
+      register: periodic_content
+      changed_when: false
+
+    - name: 输出 10periodic 内容
+      ansible.builtin.debug:
+        var: periodic_content.stdout_lines
+
+    - name: 显示 20auto-upgrades 配置内容
+      ansible.builtin.command: cat /etc/apt/apt.conf.d/20auto-upgrades
+      register: auto_upgrades_content
+      changed_when: false
+
+    - name: 输出 20auto-upgrades 内容
+      ansible.builtin.debug:
+        var: auto_upgrades_content.stdout_lines

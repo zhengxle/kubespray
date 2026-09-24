@@ -1,0 +1,68 @@
+---
+- name: 批量设置默认启动内核为 5.15.0-112-generic
+  hosts: kube_node
+  gather_facts: yes
+  become: yes
+
+  vars:
+    target_kernel: "5.15.0-112-generic"
+
+  tasks:
+    - name: 检查目标内核是否存在
+      stat:
+        path: "/boot/vmlinuz-{{ target_kernel }}"
+      register: kernel_file
+
+    - name: 目标内核不存在则报错
+      fail:
+        msg: "目标内核 /boot/vmlinuz-{{ target_kernel }} 不存在，请先安装该内核"
+      when: not kernel_file.stat.exists
+
+    - name: 检查 initrd 是否存在
+      stat:
+        path: "/boot/initrd.img-{{ target_kernel }}"
+      register: initrd_file
+
+    - name: initrd 不存在则报错
+      fail:
+        msg: "initrd /boot/initrd.img-{{ target_kernel }} 不存在"
+      when: not initrd_file.stat.exists
+
+    - name: 备份 /etc/default/grub
+      copy:
+        src: /etc/default/grub
+        dest: "/etc/default/grub.bak.{{ ansible_date_time.iso8601_basic_short }}"
+        remote_src: yes
+        mode: '0644'
+
+    - name: 确保 GRUB_DEFAULT 为 saved
+      lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_DEFAULT='
+        line: 'GRUB_DEFAULT=saved'
+        state: present
+      notify: Update GRUB
+
+    - name: 设置默认内核启动项
+      command: "grub-set-default 'Advanced options for Ubuntu>Ubuntu, with Linux {{ target_kernel }}'"
+      changed_when: true
+      notify: Update GRUB
+
+    - name: 验证 grub.cfg 中是否包含目标内核
+      command: grep -c "{{ target_kernel }}" /boot/grub/grub.cfg
+      register: grub_check
+      changed_when: false
+      failed_when: grub_check.stdout | int == 0
+
+    - name: 输出结果
+      debug:
+        msg:
+          - "主机: {{ inventory_hostname }}"
+          - "目标内核已在 grub.cfg 中出现 {{ grub_check.stdout }} 次"
+          - "默认启动项已更新为 {{ target_kernel }}，重启后执行 'uname -r' 确认"
+
+  handlers:
+    - name: Update GRUB
+      command: update-grub
+      register: update_grub_result
+      changed_when: "'Generating grub configuration file' in update_grub_result.stdout"

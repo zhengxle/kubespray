@@ -1,0 +1,9 @@
+---
+- name: 批量修复 dpkg 未完成的配置
+  hosts: all
+  become: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  tasks:
+    - name: 强制执行 dpkg --configure -a (使用默认配置)
+      command: dpkg --configure -a --force-confold --force-confdef

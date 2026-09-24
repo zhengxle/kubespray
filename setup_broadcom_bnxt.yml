@@ -1,0 +1,221 @@
+---
+# ============================================================================
+# setup_kube_node.yml
+# 功能：kube_node 节点初始化
+#   1. 安装依赖包（含 linux-headers）
+#   2. 安装 MLNX_OFED（幂等）
+#   3. NVM 固件升级
+#   4. 替换 bonding.ko 并更新模块依赖
+#   5. IPMI power cycle 重启 + boot_id 断言验证
+# ============================================================================
+- name: Setup kube_node (MLNX_OFED + NVM + bonding.ko + reboot)
+  hosts: kube_node
+  become: true
+  gather_facts: true
+  # serial: 1                     # 逐台滚动，一台完全恢复后再动下一台
+
+  vars:
+    # ---------- 路径 ----------
+    mlnx_dir: /mnt/nfs_data/02.network/MLNX_OFED_LINUX-24.07-0.6.1.0-ubuntu22.04-x86_64
+    nvm_dir: /mnt/nfs_data/02.network/broadcom/nvmUpgrade_235.2.97.0_MetaX_V1_20260626
+    mlnx_version: "MLNX_OFED_LINUX-24.07"
+
+    # ---------- bonding.ko 替换 ----------
+    bonding_src: /mnt/nfs_data/kernel-build/linux-112/linux-5.15.0/drivers/net/bonding/bonding.ko
+    bonding_target: /usr/lib/modules/5.15.0-112-generic/kernel/drivers/net/bonding/bonding.ko
+    bonding_kernel: "5.15.0-112-generic"      # depmod 用的内核版本
+
+    # ---------- IPMI ----------
+    # 本地 BMC：留空（自动 modprobe ipmi_si/ipmi_devintf）
+    # 远程 BMC 示例：ipmi_options: "-I lanplus -H 10.0.0.1 -U admin -P 'pass'"
+    ipmi_options: ""
+
+    # ---------- 依赖包 ----------
+    apt_packages:
+      - git
+      - vim
+      - bc
+      - bison
+      - libtool
+      - flex
+      - build-essential
+      - dwarves
+      - automake
+      - autoconf
+      - cmake
+      - gcc
+      - g++
+      - net-tools
+      - iproute2
+      - libssl-dev
+      - libpci-dev
+      - libelf-dev
+      - libncurses-dev
+      - dh-make
+      - strace
+      - ltrace
+      - ethtool
+      - ipmitool
+      - ca-certificates
+      - apt-transport-https
+      - "linux-headers-{{ ansible_kernel }}"
+
+  tasks:
+    # ========================================================================
+    # 0. 前置检查
+    # ========================================================================
+    - name: 仅支持 Ubuntu
+      fail:
+        msg: "本 playbook 仅支持 Ubuntu，当前系统为 {{ ansible_distribution }}"
+      when: ansible_distribution != 'Ubuntu'
+
+    # ========================================================================
+    # 1. 安装依赖包
+    # ========================================================================
+    - name: 更新 apt 缓存
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: 安装依赖包
+      apt:
+        name: "{{ apt_packages }}"
+        state: present
+
+    # ========================================================================
+    # 2. MLNX_OFED 安装
+    # ========================================================================
+    - name: 检查 MLNX_OFED 目录是否存在
+      stat:
+        path: "{{ mlnx_dir }}"
+      register: mlnx_stat
+
+    - name: MLNX_OFED 目录缺失则报错
+      fail:
+        msg: "MLNX_OFED 目录不存在: {{ mlnx_dir }}"
+      when: not mlnx_stat.stat.exists
+
+    - name: 检查 OFED 是否已安装
+      command: ofed_info -s
+      register: ofed_check
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: 执行 mlnxofedinstall（yes 应答所有交互；--force 允许重装）
+      shell: "yes | ./mlnxofedinstall --force"
+      args:
+        chdir: "{{ mlnx_dir }}"
+        executable: /bin/bash
+      register: mlnx_install
+      when: mlnx_version not in ofed_check.stdout
+
+    # ========================================================================
+    # 3. NVM 固件升级（reboot 前完成）
+    # ========================================================================
+    - name: 检查 NVM 升级目录是否存在
+      stat:
+        path: "{{ nvm_dir }}"
+      register: nvm_stat
+
+    - name: NVM 升级目录缺失则报错
+      fail:
+        msg: "NVM 升级目录不存在: {{ nvm_dir }}"
+      when: not nvm_stat.stat.exists
+
+    - name: 执行 NVM install.sh --with_roce_src
+      command: bash ./install.sh --with_roce_src
+      args:
+        chdir: "{{ nvm_dir }}"
+      register: nvm_install
+
+    # ========================================================================
+    # 4. 替换 bonding.ko（power cycle 前）
+    # ========================================================================
+    - name: 检查源 bonding.ko 是否存在
+      stat:
+        path: "{{ bonding_src }}"
+      register: bonding_src_stat
+
+    - name: 源 bonding.ko 缺失则报错
+      fail:
+        msg: "bonding.ko 源文件不存在: {{ bonding_src }}"
+      when: not bonding_src_stat.stat.exists
+
+    - name: 检查目标 bonding.ko 是否已存在
+      stat:
+        path: "{{ bonding_target }}"
+      register: bonding_target_stat
+
+    - name: 确保目标目录存在
+      file:
+        path: "{{ bonding_target | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: 备份原 bonding.ko（仅首次，已存在 .bak 则跳过）
+      copy:
+        src: "{{ bonding_target }}"
+        dest: "{{ bonding_target }}.bak"
+        remote_src: true
+        force: false
+      when: bonding_target_stat.stat.exists
+
+    - name: 复制新的 bonding.ko 到目标路径
+      copy:
+        src: "{{ bonding_src }}"
+        dest: "{{ bonding_target }}"
+        remote_src: true
+        mode: "0644"
+      register: bonding_copy
+
+    - name: 更新模块依赖
+      command: "depmod -a {{ bonding_kernel }}"
+      when: bonding_copy.changed
+      changed_when: true
+
+    # ========================================================================
+    # 5. IPMI power cycle + 恢复验证
+    # ========================================================================
+    - name: 加载本地 BMC 内核模块（本地 BMC 场景；已加载则跳过）
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - ipmi_si
+        - ipmi_devintf
+      when: ipmi_options == ""
+      changed_when: false
+      failed_when: false
+
+    - name: 记录重启前 boot_id
+      command: cat /proc/sys/kernel/random/boot_id
+      register: boot_id_before
+      changed_when: false
+
+    - name: Power cycle the node via ipmitool（连接会断，fire-and-forget）
+      shell: "ipmitool {{ ipmi_options }} power cycle"
+      async: 30
+      poll: 0
+      changed_when: true
+
+    - name: 等待节点 SSH 恢复
+      wait_for_connection:
+        delay: 30
+        timeout: 600
+
+    - name: 记录重启后 boot_id
+      command: cat /proc/sys/kernel/random/boot_id
+      register: boot_id_after
+      changed_when: false
+
+    - name: 断言节点确实完成重启
+      assert:
+        that:
+          - boot_id_after.stdout != boot_id_before.stdout
+        fail_msg: "节点未实际重启（boot_id 未变化）。请检查 ipmi_options 与 BMC 网络。"
+
+    - name: 确认 openibd 已加载新驱动
+      service:
+        name: openibd
+        state: started

@@ -1,0 +1,21 @@
+---
+- name: 修复受控节点 dpkg 锁与未完成配置
+  hosts: kube_node              # 指定目标主机组，可根据你的 hosts.yml 更改（如 kube_node 或 all）
+  become: true            # 使用 sudo 权限执行
+  gather_facts: false     # 如果系统卡死，禁用 gather_facts 可以避免收集信息时挂起
+
+  tasks:
+    - name: 预设 GRUB 安装的目标设备
+      ansible.builtin.debconf:
+        name: grub-pc
+        question: grub-pc/install_devices
+        vtype: string
+        value: "/dev/sda1"
+
+    - name: 强制非交互修复所有未完成配置
+      ansible.builtin.command: dpkg --configure -a
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        APT_LISTCHANGES_FRONTEND: none
+      register: dpkg_output
+      changed_when: "'Setting up' in dpkg_output.stdout"

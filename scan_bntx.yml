@@ -1,0 +1,41 @@
+---
+- name: Integrated Broadcom NICs & Optics Health Diagnostic (400 Nodes)
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    output_dir: "/mnt/nfs_data/scan_bntx"
+    output_csv: "{{ output_dir }}/broadcom_health_report.csv"
+
+  tasks:
+    - name: 1. 清理目标机器上的临时脚本残余
+      ansible.builtin.file:
+        path: /tmp/scan_bntx.py
+        state: absent
+
+    - name: 2. 分发并执行综合底层扫描 Python 脚本
+      ansible.builtin.script: extra_playbooks/files/scan_bntx.py
+      register: scan_raw
+      changed_when: false
+
+    - name: 3. 安全解析目标节点返回的 JSON 数据
+      ansible.builtin.set_fact:
+        nic_data: "{{ (scan_raw.stdout | regex_search('\\[.*\\]') | default('[]')) | from_json }}"
+
+    - name: 4. 在控制节点(本地)初始化/清空 CSV 报表表头
+      ansible.builtin.copy:
+        content: "Hostname,Interface,Link Status,Speed,CRC_FCS_Errors,FEC_Uncorrectable,FEC_Corrected,Temp,Vendor_PN,Vendor_SN,Rx_Power,Tx_Power,Diag_Flags\n"
+        dest: "{{ output_csv }}"
+      delegate_to: localhost
+      run_once: true
+      become: false
+
+    - name: 5. 汇总数据追加写入 NFS 路径下的 CSV 报表
+      ansible.builtin.lineinfile:
+        path: "{{ output_csv }}"
+        line: "{{ inventory_hostname }},{{ item.iface }},{{ item.link }},{{ item.speed }},{{ item.crc_errors }},{{ item.fec_uncorr }},{{ item.fec_corr }},\"{{ item.temp }}\",\"{{ item.vendor_pn }}\",\"{{ item.vendor_sn }}\",\"{{ item.rx_power }}\",\"{{ item.tx_power }}\",\"{{ item.diag_flags }}\""
+        insertafter: EOF
+      delegate_to: localhost
+      become: false
+      loop: "{{ nic_data }}"
+      when: nic_data is defined and nic_data | length > 0

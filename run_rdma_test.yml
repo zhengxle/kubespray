@@ -1,0 +1,42 @@
+---
+- name: 启动 RDMA Server 监听
+  hosts: "{{ target_server }}"
+  become: yes
+  gather_facts: no  # 禁用 Facts 采集，大幅提速
+  vars:
+    server_node_id: "{{ inventory_hostname | regex_replace('^node(\\d+)$', '\\1') | int }}"
+  tasks:
+    - name: 清理残留进程 (排除自身 Ansible 进程)
+      shell: pkill -9 -f "ib_write_bw" | grep -v "ansible" || true
+      failed_when: false
+
+    - name: 启动 RDMA Server
+      shell: |
+        nohup ./rdma_rail_bw_test.sh server {{ server_node_id }} > /tmp/rdma_server.log 2>&1 &
+      args:
+        chdir: /mnt/nfs_data/rdma_rail_test
+
+    - name: 等待服务监听
+      pause:
+        seconds: 2
+
+- name: 启动 RDMA Client 压测
+  hosts: "{{ target_client }}"
+  become: yes
+  gather_facts: no  # 禁用 Facts 采集，大幅提速
+  vars:
+    client_node_id: "{{ inventory_hostname | regex_replace('^node(\\d+)$', '\\1') | int }}"
+    server_node_id: "{{ hostvars[target_server]['inventory_hostname'] | regex_replace('^node(\\d+)$', '\\1') | int }}"
+  tasks:
+    - name: 执行 Client 测试
+      command: "./rdma_rail_bw_test.sh client {{ client_node_id }} {{ server_node_id }}"
+      args:
+        chdir: /mnt/nfs_data/rdma_rail_test
+      environment:
+        QPS: "{{ qps | default(1) }}"
+        DURATION: "{{ duration | default(30) }}"
+      register: test_output
+
+    - name: 输出实时结果
+      debug:
+        var: test_output.stdout_lines

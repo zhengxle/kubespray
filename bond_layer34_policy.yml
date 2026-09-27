@@ -9,7 +9,7 @@
 #   ansible-playbook -i inventory bond_layer34_policy.yml --limit gpu-node-002 --check --diff
 
 - name: 配置 bond 接口的 transmit-hash-policy 为 layer3+4
-  hosts: gpu_nodes
+	hosts: kube_node
   become: true
   vars:
     # 需要配置 layer3+4 的 bond 接口列表

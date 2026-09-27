@@ -1,0 +1,31 @@
+---
+- name: Install MACA SDK, Driver, Flash VBIOS and Reboot Nodes
+  hosts: all
+  become: true
+  tasks:
+    - name: 1. Clean up APT/DPKG processes and lock files
+      ansible.builtin.shell: |
+        killall -9 dpkg apt apt-get 2>/dev/null || true
+        rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock*
+      changed_when: false
+
+    - name: 2. Install MACA SDK
+      ansible.builtin.shell: bash -x ./maca-sdk-3.8.3.17/mxmaca-sdk-install.sh -f
+      args:
+        chdir: /mnt/nfs_data/maca-3.8.3/
+
+    - name: 3. Install MetaX Driver
+      ansible.builtin.shell: bash -x ./metax-driver-3.8.3.35-deb-x86_64.run -- -f
+      args:
+        chdir: /mnt/nfs_data/maca-3.8.3/
+
+    - name: 4. Flash VBIOS firmware
+      ansible.builtin.command: mx-smi -U /lib/firmware/metax/mxc500/mxvbios-1.35.6.0-1-C500.bin -i all
+
+    - name: 5. Reboot node and wait for it to come back online
+      ansible.builtin.reboot:
+        reboot_timeout: 600       # 最长等待 10 分钟
+        connect_timeout: 15
+        pre_reboot_delay: 2       # 延迟 2 秒触发重启
+        post_reboot_delay: 15     # 系统启动后再等待 15 秒确认服务就绪
+        msg: "Rebooting node after MACA SDK, Driver, and VBIOS update"

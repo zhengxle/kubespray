@@ -1,0 +1,76 @@
+---
+# 为所有 bond 接口设置 LACP transmit-hash-policy 为 layer3+4
+# 适用于 netplan 0.106 在 networkd 后端下对该参数静默丢弃的场景
+#
+# 使用方法:
+#   ansible-playbook -i inventory bond_layer34_policy.yml
+#
+# 或在单个节点上调试运行:
+#   ansible-playbook -i inventory bond_layer34_policy.yml --limit gpu-node-002 --check --diff
+
+- name: 配置 bond 接口的 transmit-hash-policy 为 layer3+4
+  hosts: gpu_nodes
+  become: true
+  vars:
+    # 需要配置 layer3+4 的 bond 接口列表
+    bond_interfaces:
+      - bond0
+      - bond_compute0
+      - bond_compute1
+      - bond_compute2
+      - bond_compute3
+      - bond_storage0
+
+  tasks:
+    - name: 为每个 bond 创建 systemd-networkd override 目录
+      ansible.builtin.file:
+        path: "/etc/systemd/network/10-netplan-{{ item }}.network.d"
+        state: directory
+        mode: '0755'
+      loop: "{{ bond_interfaces }}"
+
+    - name: 写入 override.conf 配置文件
+      ansible.builtin.copy:
+        content: |
+          [Bond]
+          Mode=802.3ad
+          LACPTransmitRate=fast
+          TransmitHashPolicy=layer3+4
+        dest: "/etc/systemd/network/10-netplan-{{ item }}.network.d/override.conf"
+        mode: '0644'
+      loop: "{{ bond_interfaces }}"
+      notify: 重启 systemd-networkd
+
+    # 立即刷新 handler，确保重启在验证之前完成
+    - name: 刷新 handler 执行重启
+      ansible.builtin.meta: flush_handlers
+
+    - name: 等待 systemd-networkd 恢复就绪
+      ansible.builtin.wait_for:
+        timeout: 10
+
+    - name: 验证 bond 接口的哈希策略
+      ansible.builtin.command: "cat /proc/net/bonding/{{ item }} | grep 'Transmit Hash Policy'"
+      register: bond_hash_result
+      loop: "{{ bond_interfaces }}"
+      changed_when: false
+
+    - name: 打印 bond 哈希策略验证结果
+      ansible.builtin.debug:
+        msg: "{{ item.item }} => {{ item.stdout }}"
+      loop: "{{ bond_hash_result.results }}"
+
+    - name: 检查所有 bond 是否已生效 layer3+4
+      ansible.builtin.assert:
+        that:
+          - "'layer3+4' in item.stdout"
+        fail_msg: "{{ item.item }} 未生效 layer3+4，当前值: {{ item.stdout }}"
+        quiet: true
+      loop: "{{ bond_hash_result.results }}"
+
+  handlers:
+    - name: 重启 systemd-networkd
+      ansible.builtin.systemd:
+        name: systemd-networkd
+        state: restarted
+      listen: 重启 systemd-networkd

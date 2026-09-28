@@ -3,9 +3,16 @@
   hosts: localhost
   gather_facts: no
   connection: local
+
   vars:
-    csv_file: "server_ip_sn_mapping.csv"
+    csv_file: "server_sn_ip.csv"
     connect_ip_field: "Business_IP"
+    # 主机名前缀，用于生成新主机名
+    old_prefix: "智算节点服务器-"
+    new_prefix: "gpu-node-"
+    ansible_user_name: "ubuntu"
+    ansible_password_value: "Server@123."
+
   tasks:
     - name: 读取 CSV
       read_csv:
@@ -13,9 +20,23 @@
         delimiter: ","
       register: csv_data
 
-    - name: 筛选智算服务器
+    - name: 显示 CSV 表头（调试用）
+      debug:
+        msg: "列名: {{ csv_data.list[0].keys() | list }}"
+
+    - name: 筛选智算节点服务器
       set_fact:
-        gpu_hosts: "{{ csv_data.list | selectattr('Hostname', 'match', '^智算服务器-') | list }}"
+        gpu_hosts: >-
+          {{
+            csv_data.list
+            | selectattr('Hostname', 'defined')
+            | selectattr('Hostname', 'match', '^智算节点服务器-')
+            | list
+          }}
+
+    - name: 显示找到的主机数量
+      debug:
+        msg: "共找到 {{ gpu_hosts | length }} 台智算节点服务器"
 
     - name: 生成 inventory 文件
       copy:
@@ -23,5 +44,5 @@
         content: |
           [gpu_nodes]
           {% for h in gpu_hosts %}
-          {{ h.Business_IP }} ansible_host={{ h.Business_IP }} ansible_user=ubuntu ansible_password='Server@123.' ansible_become_password='Server@123.' new_hostname=gpu-node-{{ h.Hostname.split('-')[-1] }} old_hostname={{ h.Hostname }}
+          {{ h.Hostname }} ansible_host={{ h.Business_IP }} ansible_user={{ ansible_user_name }} ansible_password='{{ ansible_password_value }}' ansible_become_password='{{ ansible_password_value }}' new_hostname={{ h.Hostname | regex_replace('^' + old_prefix, new_prefix) }} old_hostname={{ h.Hostname }}
           {% endfor %}

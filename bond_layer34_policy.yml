@@ -9,7 +9,7 @@
 #   ansible-playbook -i inventory bond_layer34_policy.yml --limit gpu-node-002 --check --diff
 
 - name: 配置 bond 接口的 transmit-hash-policy 为 layer3+4
-	hosts: kube_node
+  hosts: kube_node
   become: true
   vars:
     # 需要配置 layer3+4 的 bond 接口列表
@@ -49,8 +49,23 @@
       ansible.builtin.wait_for:
         timeout: 10
 
+    - name: 通过 sysfs 直接设置哈希策略（兜底方案）
+      # 当 override 未生效时，直接写 sysfs 确保立即生效
+      ansible.builtin.shell: "echo layer3+4 > /sys/class/net/{{ item }}/bonding/xmit_hash_policy"
+      loop: "{{ bond_interfaces }}"
+      changed_when: true
+      failed_when: false
+      register: sysfs_set_result
+
+    - name: 通过 sysfs 设置失败时告警
+      ansible.builtin.debug:
+        msg: "警告: 对 {{ item.item }} 设置 sysfs 失败，请检查接口是否存在"
+      loop: "{{ sysfs_set_result.results }}"
+      when: item.failed
+
     - name: 验证 bond 接口的哈希策略
-      ansible.builtin.command: "cat /proc/net/bonding/{{ item }} | grep 'Transmit Hash Policy'"
+      # 使用 shell 模块以支持管道符 |
+      ansible.builtin.shell: "grep 'Transmit Hash Policy' /proc/net/bonding/{{ item }}"
       register: bond_hash_result
       loop: "{{ bond_interfaces }}"
       changed_when: false
@@ -74,3 +89,4 @@
         name: systemd-networkd
         state: restarted
       listen: 重启 systemd-networkd
+

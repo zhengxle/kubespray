@@ -1,0 +1,29 @@
+---
+- name: Run Megatron-LM Llama2 Training via Docker
+  hosts: kube_node
+  gather_facts: yes
+  vars:
+    work_dir: "/mnt/nfs_data/training_test"
+
+  tasks:
+    - name: 1. Run docker_run.sh to start the container
+      shell: |
+        bash -x ./docker_run.sh
+      args:
+        chdir: "{{ work_dir }}"
+      register: docker_result
+      ignore_errors: yes  # 如果容器已经存在报错，可以忽略，继续执行后续
+
+    - name: 2. Run training via run_7b.sh (Async background execution)
+      shell: |
+        bash ./run_7b.sh > /dev/null 2>&1 &
+      args:
+        chdir: "/mnt/nfs_data/training_test"
+      async: 86400
+      poll: 0   # <--- 设置为 0，代表立刻触发并返回，不等待、不阻塞，直接并行下发给所有节点
+      register: train_result
+
+
+    - name: 3. Show training completion status
+      debug:
+        msg: "Training finished on {{ inventory_hostname }}!"

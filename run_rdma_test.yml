@@ -1,42 +1,92 @@
 ---
-- name: 启动 RDMA Server 监听
-  hosts: "{{ target_server }}"
+- name: 1. 准备环境与清理残留进程 (Server & Client)
+  hosts: "{{ target_server }}, {{ target_client }}"
   become: yes
-  gather_facts: no  # 禁用 Facts 采集，大幅提速
+  gather_facts: no  # 禁用 Facts 采集，提速
   vars:
-    server_node_id: "{{ inventory_hostname | regex_replace('^node(\\d+)$', '\\1') | int }}"
+    qp_val: "{{ qp | default(qps | default(8)) }}"
+    duration_val: "{{ duration | default(30) }}"
   tasks:
-    - name: 清理残留进程 (排除自身 Ansible 进程)
-      shell: pkill -9 -f "ib_write_bw" | grep -v "ansible" || true
+    - name: 停止上一次残余的测试进程
+      shell: |
+        pkill -9 -f "ib_write_bw" || true
+        pkill -9 -f "rdma_rail_bw_test.sh" || true
       failed_when: false
 
-    - name: 启动 RDMA Server
+    - name: 确认日志目录存在
+      file:
+        path: /mnt/nfs_data/rdma_rail_test/rdma_rail_logs
+        state: directory
+        mode: '0755'
+
+- name: 2. 启动 RDMA Server 监听
+  hosts: "{{ target_server }}"
+  become: yes
+  gather_facts: no
+  vars:
+    server_node_id: "{{ inventory_hostname | regex_replace('^gpu-node-0*|^node0*', '') | int }}"
+    qp_val: "{{ qp | default(qps | default(8)) }}"
+    duration_val: "{{ duration | default(30) }}"
+  tasks:
+    - name: 后台启动 RDMA Server
       shell: |
         nohup ./rdma_rail_bw_test.sh server {{ server_node_id }} > /tmp/rdma_server.log 2>&1 &
       args:
         chdir: /mnt/nfs_data/rdma_rail_test
+      environment:
+        QP: "{{ qp_val }}"
+        QPS: "{{ qp_val }}"
+        DURATION: "{{ duration_val }}"
 
-    - name: 等待服务监听
+    - name: 等待 Server 5 个 Rail 端口监听就绪
       pause:
-        seconds: 2
+        seconds: 3
 
-- name: 启动 RDMA Client 压测
+- name: 3. 启动 RDMA Client 压测
   hosts: "{{ target_client }}"
   become: yes
-  gather_facts: no  # 禁用 Facts 采集，大幅提速
+  gather_facts: no
   vars:
-    client_node_id: "{{ inventory_hostname | regex_replace('^node(\\d+)$', '\\1') | int }}"
-    server_node_id: "{{ hostvars[target_server]['inventory_hostname'] | regex_replace('^node(\\d+)$', '\\1') | int }}"
+    client_node_id: "{{ inventory_hostname | regex_replace('^gpu-node-0*|^node0*', '') | int }}"
+    server_node_id: "{{ hostvars[target_server]['inventory_hostname'] | regex_replace('^gpu-node-0*|^node0*', '') | int }}"
+    qp_val: "{{ qp | default(qps | default(8)) }}"
+    duration_val: "{{ duration | default(30) }}"
   tasks:
-    - name: 执行 Client 测试
+    - name: 执行 Client 并行 Rail 测试
       command: "./rdma_rail_bw_test.sh client {{ client_node_id }} {{ server_node_id }}"
       args:
         chdir: /mnt/nfs_data/rdma_rail_test
       environment:
-        QPS: "{{ qps | default(1) }}"
-        DURATION: "{{ duration | default(30) }}"
+        QP: "{{ qp_val }}"
+        QPS: "{{ qp_val }}"
+        DURATION: "{{ duration_val }}"
       register: test_output
 
-    - name: 输出实时结果
+    - name: 输出 Client 测试结果 summary
       debug:
         var: test_output.stdout_lines
+
+- name: 4. 汇总生成带宽报告与硬件 Error 检查
+  hosts: "{{ target_client }}"
+  become: yes
+  gather_facts: no
+  tasks:
+    - name: 运行报告生成脚本
+      command: "python3 /mnt/nfs_data/rdma_rail_test/generate_report.py"
+      register: report_output
+
+    - name: 打印测试汇总表格
+      debug:
+        var: report_output.stdout_lines
+
+    - name: 检查博通/Mellanox 物理网口底层错帧与 Drop 计数
+      shell: |
+        for dev in $(rdma link | awk '{print $2}' | cut -d/ -f1 | sort -u); do
+          echo "=== RDMA Dev: $dev ==="
+          ethtool -S $(rdma link | grep "$dev" | awk '{print $4}') 2>/dev/null | grep -i -E "drop|error|crc|discard|fatal" | grep -v ": 0" || echo "No PHY Errors"
+        done
+      register: phy_check
+
+    - name: 输出 PHY 物理层健康状况
+      debug:
+        var: phy_check.stdout_lines

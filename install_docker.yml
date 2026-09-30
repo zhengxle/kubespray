@@ -1,0 +1,65 @@
+---
+- name: Simple Docker setup and image load
+  hosts: kube_node
+  become: true
+  tasks:
+    - name: Install docker.io
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+        update_cache: true
+
+    - name: Ensure docker and video groups exist
+      ansible.builtin.group:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - docker
+        - video
+
+    - name: Add ubuntu user to docker and video groups
+      ansible.builtin.user:
+        name: ubuntu
+        groups:
+          - docker
+          - video
+        append: true
+
+    - name: Load Docker image and automatically tag it
+      ansible.builtin.shell: |
+        set -e
+        # 1. 修正后的 NFS 路径
+        TAR_PATH="/mnt/nfs_data/sz/work/05.modelzoo/model/images/megatron-lm-3.7.0.9.tar"
+        TARGET_TAG="megatron-lm:0.17.0-maca.ai3.7.0.9-torch2.8-py312-ubuntu22.04-amd64"
+
+        # 2. 自动捕获 docker load 提取出的 Image ID
+        LOAD_OUTPUT=$(docker load -i "$TAR_PATH")
+        echo "$LOAD_OUTPUT"
+
+        # 动态提取镜像 ID（处理 Loaded image ID: sha256:xxx 或 Loaded image: xxx）
+        IMAGE_ID=$(echo "$LOAD_OUTPUT" | awk -F'sha256:' '{print $2}' | awk '{print $1}' | cut -c 1-12)
+
+        if [ -n "$IMAGE_ID" ]; then
+            docker tag "$IMAGE_ID" "$TARGET_TAG"
+        else
+            echo "Failed to extract Image ID from load output"
+            exit 1
+        fi
+
+    - name: List all Docker containers (docker ps -a)
+      ansible.builtin.command: docker ps -a
+      register: docker_ps_output
+      changed_when: false
+
+    - name: Show docker ps output
+      ansible.builtin.debug:
+        msg: "{{ docker_ps_output.stdout_lines }}"
+
+    - name: List all Docker images (docker images -a)
+      ansible.builtin.command: docker images -a
+      register: docker_images_output
+      changed_when: false
+
+    - name: Show docker images output
+      ansible.builtin.debug:
+        msg: "{{ docker_images_output.stdout_lines }}"

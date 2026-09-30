@@ -3,7 +3,7 @@
 
 #!/bin/bash
 START_NODE=1
-END_NODE=32
+END_NODE=128
 TOTAL_NODES=$(( END_NODE - START_NODE + 1 ))
 INVENTORY="inventory/my-cluster/hosts.yml"
 

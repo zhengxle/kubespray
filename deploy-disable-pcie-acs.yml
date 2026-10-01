@@ -1,0 +1,54 @@
+---
+- name: Deploy disable-pcie-acs script and systemd service
+  hosts: kube_node
+  become: true
+  gather_facts: false
+
+  vars:
+    script_src: "extra_playbooks/files/disable-pcie-acs.sh"
+    service_src: "extra_playbooks/files/disable-pcie-acs.service"
+    script_dest: "/usr/local/sbin/disable-pcie-acs.sh"
+    service_dest: "/etc/systemd/system/disable-pcie-acs.service"
+
+  tasks:
+    - name: Ensure /usr/local/sbin exists
+      ansible.builtin.file:
+        path: /usr/local/sbin
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy disable-pcie-acs.sh to /usr/local/sbin
+      ansible.builtin.copy:
+        src: "{{ script_src }}"
+        dest: "{{ script_dest }}"
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Reload systemd
+
+    - name: Copy disable-pcie-acs.service to /etc/systemd/system
+      ansible.builtin.copy:
+        src: "{{ service_src }}"
+        dest: "{{ service_dest }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    # 立即刷新 systemd（不等 handler），确保后续 enable/start 能识别新 unit
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and start disable-pcie-acs.service
+      ansible.builtin.systemd:
+        name: disable-pcie-acs.service
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

@@ -1,0 +1,10 @@
+[Unit]
+Description=Disable PCIe ACS
+After=local-fs.target
+Before=network-pre.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/disable-pcie-acs.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,82 @@
+---
+- name: Configure system timezone and chrony clock sync
+  hosts: kube_node
+  become: true
+  gather_facts: false
+
+  vars:
+    # 时区配置
+    target_timezone: "Asia/Shanghai"
+
+    # 国内公开 NTP 服务器（阿里云 + 腾讯云 + 国家授时中心）
+    chrony_servers:
+      - "ntp.aliyun.com"
+      - "ntp.tencent.com"
+      - "ntp.ntsc.ac.cn"
+    chrony_server_options: "iburst"
+
+  tasks:
+    # ---------- 1. 配置系统时区 ----------
+    - name: Set system timezone to {{ target_timezone }}
+      community.general.timezone:
+        name: "{{ target_timezone }}"
+
+    - name: Verify current timezone
+      ansible.builtin.command: timedatectl
+      register: timedatectl_output
+      changed_when: false
+
+    - name: Show current timezone
+      ansible.builtin.debug:
+        msg: "{{ timedatectl_output.stdout_lines }}"
+
+    # ---------- 2. 配置 chrony 时钟服务器 ----------
+    - name: Ensure chrony is installed
+      ansible.builtin.package:
+        name: chrony
+        state: present
+
+    - name: Backup existing chrony.conf
+      ansible.builtin.copy:
+        src: /etc/chrony/chrony.conf
+        dest: /etc/chrony/chrony.conf.bak
+        remote_src: true
+        force: false
+      ignore_errors: true
+
+    - name: Remove existing server/pool lines in chrony.conf
+      ansible.builtin.lineinfile:
+        path: /etc/chrony/chrony.conf
+        regexp: '^\s*(server|pool)\s+'
+        state: absent
+
+    - name: Add configured clock servers to chrony.conf
+      ansible.builtin.lineinfile:
+        path: /etc/chrony/chrony.conf
+        line: "server {{ item }} {{ chrony_server_options }}"
+        insertafter: EOF
+        state: present
+      loop: "{{ chrony_servers }}"
+      notify: Restart chrony
+
+    # ---------- 3. 启用并启动 chrony 服务 ----------
+    - name: Enable and start chrony service
+      ansible.builtin.systemd:
+        name: chrony
+        enabled: true
+        state: started
+
+    - name: Verify chrony service status
+      ansible.builtin.command: systemctl is-active chrony
+      register: chrony_status
+      changed_when: false
+
+    - name: Show chrony service status
+      ansible.builtin.debug:
+        msg: "chrony service is {{ chrony_status.stdout }}"
+
+  handlers:
+    - name: Restart chrony
+      ansible.builtin.systemd:
+        name: chrony
+        state: restarted

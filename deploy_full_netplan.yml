@@ -1,0 +1,38 @@
+---
+- name: Configure netplan on kube_node
+  hosts: kube_node
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Get system serial number
+      ansible.builtin.command:
+        cmd: dmidecode -s system-serial-number
+      register: serial_number
+      changed_when: false
+
+    - name: Remove existing netplan configs
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      with_fileglob:
+        - /etc/netplan/*
+
+    - name: Copy netplan config files from NFS
+      ansible.builtin.copy:
+        src: "/mnt/nfs_data/netplan_configs/{{ item.prefix }}-{{ serial_number.stdout | trim }}.yaml"
+        dest: "/etc/netplan/{{ item.prefix }}-{{ serial_number.stdout | trim }}.yaml"
+        remote_src: true
+        mode: "0644"
+      loop:
+        - { prefix: "01-business" }
+        - { prefix: "02-compute" }
+        - { prefix: "03-storage" }
+
+    - name: Apply netplan configuration (async, no wait)
+      ansible.builtin.command:
+        cmd: netplan apply
+      async: 120          # 最多后台运行 120 秒
+      poll: 0             # 不等待结果，立即返回
+      register: netplan_apply_job
+      changed_when: true

@@ -1,19 +1,42 @@
 #!/usr/bin/env python3
 import os
 import sys
+import csv
+
+def read_business_ips(csv_file):
+    """从 server_sn_ip.csv 中读取 Business_IP 列，返回有序的 IP 列表。"""
+    ips = []
+    with open(csv_file, 'r', encoding='utf-8-sig') as f:  # utf-8-sig 兼容 BOM
+        reader = csv.DictReader(f)
+        for row in reader:
+            ip = (row.get('Business_IP') or '').strip()
+            if ip:
+                ips.append(ip)
+    return ips
+
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 build-inventory.py <IP1> <IP2> ... <IPN>")
-        print("Example: python3 build-inventory.py 172.17.0.1 172.17.0.2 ...")
+    # --- 0. 确定 CSV 文件路径 (可通过环境变量覆盖) ---
+    csv_file = os.environ.get('CSV_FILE', '../../server_sn_ip.csv')
+    if not os.path.exists(csv_file):
+        print(f"[!] 错误: 找不到 CSV 文件: {csv_file}")
         sys.exit(1)
 
-    all_ips = sys.argv[1:]
-    total_count = len(all_ips)
+    # 从 CSV 读取 Business_IP 作为 worker 节点地址
+    worker_ips = read_business_ips(csv_file)
+    total_count = len(worker_ips)
 
-    # --- 1. 节点数量配置 (可通过环境变量动态修改) ---
-    master_count = int(os.environ.get('MASTER_COUNT', 3))  # 默认前 3 个 IP 作为 Master
-    etcd_count = int(os.environ.get('ETCD_COUNT', 3))      # 默认接下来的 3 个 IP 作为 ETCD
+    if total_count == 0:
+        print(f"[!] 错误: CSV 文件 {csv_file} 中未读取到任何 Business_IP。")
+        sys.exit(1)
+
+    # --- 1. 节点数量配置 ---
+    master_count = int(os.environ.get('MASTER_COUNT', 3))  # Master 节点数量（IP 留空）
+    etcd_count = int(os.environ.get('ETCD_COUNT', 3))      # ETCD 节点数量（IP 留空）
+
+    # Master / ETCD 的 IP 先留空（占位）
+    master_ips = [''] * master_count
+    etcd_ips = [''] * etcd_count
 
     # --- 2. 各角色凭证配置 ---
     master_user = os.environ.get('MASTER_USER', 'ubuntu')
@@ -24,20 +47,6 @@ def main():
 
     worker_user = os.environ.get('WORKER_USER', 'ubuntu')
     worker_pass = os.environ.get('WORKER_PASS', 'Server@123.')
-
-    # --- 3. 按“先 Master、再 ETCD、后 Worker”的顺序切分 IP ---
-    needed_mgmt_ips = master_count + etcd_count
-
-    if total_count <= needed_mgmt_ips:
-        print(f"[!] 警告: 传入 IP 总数 ({total_count}) 小于或等于管理节点总需求 ({needed_mgmt_ips})。将自动降级复用节点。")
-        master_ips = all_ips[:master_count]
-        etcd_ips = all_ips[:etcd_count]
-        worker_ips = all_ips
-    else:
-        # 完全独立切分
-        master_ips = all_ips[:master_count]
-        etcd_ips = all_ips[master_count : master_count + etcd_count]
-        worker_ips = all_ips[master_count + etcd_count :]
 
     config_file = os.environ.get('CONFIG_FILE', './hosts.yml')
     config_dir = os.path.dirname(config_file)
@@ -83,22 +92,22 @@ def main():
     # --- Hosts 节点列表 (按 Master -> ETCD -> Worker 顺序写入) ---
     lines.append("  hosts:")
 
-    # 第一步：写入 Master 节点信息
-    for i, ip in enumerate(master_ips, start=1):
+    # 第一步：写入 Master 节点信息（IP 留空占位）
+    for i in range(1, len(master_ips) + 1):
         lines.append(f"    master{i}:")
-        lines.append(f"      ansible_host: {ip}")
-        lines.append(f"      ip: {ip}")
-        lines.append(f"      access_ip: {ip}")
+        lines.append(f"      ansible_host: {master_ips[i-1]}")
+        lines.append(f"      ip: {master_ips[i-1]}")
+        lines.append(f"      access_ip: {master_ips[i-1]}")
         lines.append(f"      ansible_user: {master_user}")
         lines.append(f"      ansible_password: '{master_pass}'")
         lines.append(f"      ansible_become_password: '{master_pass}'")
 
-    # 第二步：写入 ETCD 节点信息
-    for i, ip in enumerate(etcd_ips, start=1):
+    # 第二步：写入 ETCD 节点信息（IP 留空占位）
+    for i in range(1, len(etcd_ips) + 1):
         lines.append(f"    etcd{i}:")
-        lines.append(f"      ansible_host: {ip}")
-        lines.append(f"      ip: {ip}")
-        lines.append(f"      access_ip: {ip}")
+        lines.append(f"      ansible_host: {etcd_ips[i-1]}")
+        lines.append(f"      ip: {etcd_ips[i-1]}")
+        lines.append(f"      access_ip: {etcd_ips[i-1]}")
         lines.append(f"      ansible_user: {etcd_user}")
         lines.append(f"      ansible_password: '{etcd_pass}'")
         lines.append(f"      ansible_become_password: '{etcd_pass}'")
@@ -115,9 +124,9 @@ def main():
         f.write("\n".join(lines) + "\n")
 
     print(f"--> [Success] 成功生成 Kubernetes Inventory 清单: {config_file}")
-    print(f"    1. Master 节点 ({len(master_ips)}台) : master1 ~ master{len(master_ips)} ({', '.join(master_ips)})")
-    print(f"    2. ETCD 节点   ({len(etcd_ips)}台)   : etcd1 ~ etcd{len(etcd_ips)} ({', '.join(etcd_ips)})")
-    print(f"    3. Worker 节点 ({len(worker_ips)}台) : node1 ~ node{len(worker_ips)} (纯计算节点)")
+    print(f"    1. Master 节点 ({len(master_ips)}台) : master1 ~ master{len(master_ips)} (IP 待填写)")
+    print(f"    2. ETCD 节点   ({len(etcd_ips)}台)   : etcd1 ~ etcd{len(etcd_ips)} (IP 待填写)")
+    print(f"    3. Worker 节点 ({len(worker_ips)}台) : node1 ~ node{len(worker_ips)} (来自 CSV 的 Business_IP)")
 
 if __name__ == "__main__":
     main()

@@ -5,7 +5,6 @@
   gather_facts: false
 
   tasks:
-
     - name: Copy RDMA rename script
       ansible.builtin.copy:
         src: extra_playbooks/files/bnxt_rename_bond.sh
@@ -13,7 +12,6 @@
         owner: root
         group: root
         mode: '0755'
-      notify: Restart RDMA rename service
 
     - name: Copy systemd service
       ansible.builtin.copy:
@@ -22,22 +20,8 @@
         owner: root
         group: root
         mode: '0644'
-      notify: Restart RDMA rename service
 
-    - name: Enable service
-      ansible.builtin.systemd:
-        name: bnxt_rename_bond.service
-        enabled: true
-        daemon_reload: true
-
-    - name: Start service
-      ansible.builtin.systemd:
-        name: bnxt_rename_bond.service
-        state: started
-
-  handlers:
-
-    - name: Restart RDMA rename service
+    - name: Enable and restart service (always run script)
       ansible.builtin.systemd:
         name: bnxt_rename_bond.service
         enabled: true

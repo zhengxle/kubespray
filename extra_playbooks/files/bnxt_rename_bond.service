@@ -7,7 +7,7 @@ After=network-online.target rdma.service openibd.service
 Type=oneshot
 ExecStart=/usr/local/sbin/bnxt_rename_bond.sh
 RemainAfterExit=yes
-TimeoutStartSec=60
+TimeoutStartSec=300
 
 [Install]
 WantedBy=multi-user.target

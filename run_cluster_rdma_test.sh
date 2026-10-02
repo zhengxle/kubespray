@@ -3,7 +3,7 @@ START_NODE=1
 END_NODE=128
 TOTAL_NODES=$(( END_NODE - START_NODE + 1 ))
 INVENTORY="inventory/my-cluster/hosts.yml"
-MAX_PARALLEL=8   # 并发数，可根据控制机资源和网络带宽调整
+MAX_PARALLEL=1   # 并发数，可根据控制机资源和网络带宽调整
 
 run_test() {
     local i=$1

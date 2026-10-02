@@ -11,12 +11,17 @@
       register: serial_number
       changed_when: false
 
+    - name: Find existing netplan configs on target host
+      ansible.builtin.find:
+        paths: /etc/netplan
+        patterns: "*.yaml"
+      register: netplan_files
+
     - name: Remove existing netplan configs
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ item.path }}"
         state: absent
-      with_fileglob:
-        - /etc/netplan/*
+      loop: "{{ netplan_files.files }}"
 
     - name: Copy netplan config files from NFS
       ansible.builtin.copy:

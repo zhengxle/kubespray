@@ -8,8 +8,8 @@
 
     - name: Copy RDMA rename script
       ansible.builtin.copy:
-        src: extra_playbooks/files/bntx_rename_bond.sh
-        dest: /usr/local/sbin/bntx_rename_bond.sh
+        src: extra_playbooks/files/bnxt_rename_bond.sh
+        dest: /usr/local/sbin/bnxt_rename_bond.sh
         owner: root
         group: root
         mode: '0755'
@@ -17,8 +17,8 @@
 
     - name: Copy systemd service
       ansible.builtin.copy:
-        src: extra_playbooks/files/bntx_rename_bond.service
-        dest: /etc/systemd/system/bntx_rename_bond.service
+        src: extra_playbooks/files/bnxt_rename_bond.service
+        dest: /etc/systemd/system/bnxt_rename_bond.service
         owner: root
         group: root
         mode: '0644'
@@ -26,20 +26,20 @@
 
     - name: Enable service
       ansible.builtin.systemd:
-        name: bntx_rename_bond.service
+        name: bnxt_rename_bond.service
         enabled: true
         daemon_reload: true
 
     - name: Start service
       ansible.builtin.systemd:
-        name: bntx_rename_bond.service
+        name: bnxt_rename_bond.service
         state: started
 
   handlers:
 
     - name: Restart RDMA rename service
       ansible.builtin.systemd:
-        name: bntx_rename_bond.service
+        name: bnxt_rename_bond.service
         enabled: true
         state: restarted
         daemon_reload: true

@@ -74,6 +74,7 @@
     - name: 运行报告生成脚本
       command: "python3 /mnt/nfs_data/rdma_rail_test/generate_report.py"
       register: report_output
+      changed_when: false   # 避免每次都报 changed 状态
 
     - name: 打印测试汇总表格
       debug:
@@ -81,12 +82,31 @@
 
     - name: 检查博通/Mellanox 物理网口底层错帧与 Drop 计数
       shell: |
-        for dev in $(rdma link | awk '{print $2}' | cut -d/ -f1 | sort -u); do
-          echo "=== RDMA Dev: $dev ==="
-          ethtool -S $(rdma link | grep "$dev" | awk '{print $4}') 2>/dev/null | grep -i -E "drop|error|crc|discard|fatal" | grep -v ": 0" || echo "No PHY Errors"
+        echo "===== 原始 rdma link 输出 ====="
+        rdma link
+        echo "===== 开始检查物理口 ====="
+
+        # 直接写死要检查的 Bond 接口，避免 awk 列号解析问题
+        for bond_dev in bond_compute0 bond_compute1 bond_compute2 bond_compute3 bond_storage0; do
+            if [ -d "/sys/class/net/$bond_dev/bonding" ]; then
+                slaves=$(cat /sys/class/net/$bond_dev/bonding/slaves 2>/dev/null)
+                if [ -z "$slaves" ]; then
+                    echo "[$bond_dev] 无 Slave 接口"
+                    continue
+                fi
+                for slave in $slaves; do
+                    echo "--- 检查物理网卡: $slave ---"
+                    # 输出所有非零的 drop/error 计数
+                    ethtool -S "$slave" 2>/dev/null | grep -i -E "drop|error|crc|discard|fatal" | grep -v ": 0" || echo "    [OK] 无丢包或物理层错误"
+                done
+            else
+                echo "[$bond_dev] 未找到 bonding 目录（可能不是 Bond 接口）"
+            fi
         done
       register: phy_check
+      changed_when: false
 
     - name: 输出 PHY 物理层健康状况
       debug:
         var: phy_check.stdout_lines
+

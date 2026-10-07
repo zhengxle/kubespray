@@ -1,0 +1,95 @@
+---
+- name: Check and filter abnormal Bond interfaces
+  hosts: kube_node # 替换为你的目标主机组，如 compute_nodes
+  gather_facts: no
+  become: yes # 读取 /proc 和执行 ip 命令通常需要 root 权限
+
+  vars:
+    # 定义需要检查的所有 bond 接口
+    bond_interfaces:
+      - bond_compute0
+      - bond_compute1
+      - bond_compute2
+      - bond_compute3
+      - bond_storage0
+      - bond0
+
+  tasks:
+    - name: Execute bond health check script on remote nodes
+      shell: |
+        #!/bin/bash
+        BONDS="{{ bond_interfaces | join(' ') }}"
+
+        for bond in $BONDS; do
+            FILE="/proc/net/bonding/$bond"
+
+            # 1. 检查 bond 文件是否存在
+            if [ ! -f "$FILE" ]; then
+                echo "ABNORMAL|$bond|Bond interface does not exist"
+                continue
+            fi
+
+            # 2. 提取 Bond 整体状态
+            BOND_MII=$(grep "MII Status" "$FILE" | head -n 1 | awk '{print $3}')
+            if [ "$BOND_MII" != "up" ]; then
+                echo "ABNORMAL|$bond|Bond overall MII Status is $BOND_MII"
+            fi
+
+            # 3. 提取 LACP 状态
+            LACP=$(grep "LACP active" "$FILE" | awk '{print $3}')
+            if [ "$LACP" != "on" ]; then
+                echo "ABNORMAL|$bond|LACP active is $LACP"
+            fi
+
+            # 4. 检查 Slave 的 Aggregator ID 是否一致
+            AGG_IDS=$(grep "Aggregator ID" "$FILE" | awk '{print $3}' | sort -u)
+            AGG_COUNT=$(echo "$AGG_IDS" | wc -l)
+            if [ "$AGG_COUNT" -gt 1 ]; then
+                echo "ABNORMAL|$bond|Inconsistent Aggregator IDs found: $(echo $AGG_IDS | tr '\n' ' ')"
+            fi
+
+            # 5. 遍历每个 Slave 网卡进行细节检查
+            # 使用 awk 按 "Slave Interface" 分割文本块
+            awk -v bond="$bond" '
+                /^Slave Interface:/ {
+                    if (iface != "" && iface != "none") {
+                        check_slave(iface, mii, churn_a, churn_p)
+                    }
+                    iface = $3
+                    mii = "unknown"; churn_a = "unknown"; churn_p = "unknown"
+                }
+                /MII Status:/ { if (iface != "") mii = $3 }
+                /Actor Churn State:/ { if (iface != "") churn_a = $4 }
+                /Partner Churn State:/ { if (iface != "") churn_p = $4 }
+                END {
+                    if (iface != "" && iface != "none") {
+                        check_slave(iface, mii, churn_a, churn_p)
+                    }
+                }
+                function check_slave(slave, mii, ca, cp) {
+                    if (mii != "up") {
+                        print "ABNORMAL|" bond "|Slave " slave " MII Status is " mii
+                    }
+                    if (ca != "none" && ca != "unknown") {
+                        print "ABNORMAL|" bond "|Slave " slave " Actor Churn State is " ca
+                    }
+                    if (cp != "none" && cp != "unknown") {
+                        print "ABNORMAL|" bond "|Slave " slave " Partner Churn State is " cp
+                    }
+                }
+            ' "$FILE"
+        done
+      register: bond_check_output
+      changed_when: false
+      failed_when: false # 即使有异常，也不希望 Ansible 任务直接失败中断
+
+    - name: Generate report of abnormal nodes
+      # 当输出中包含 ABNORMAL 关键字时触发
+      when: "'ABNORMAL' in bond_check_output.stdout"
+      debug:
+        msg: "{{ bond_check_output.stdout_lines | select('search', 'ABNORMAL') | list }}"
+
+    - name: Print success message if no abnormalities found
+      when: "'ABNORMAL' not in bond_check_output.stdout"
+      debug:
+        msg: "Host {{ inventory_hostname }}: All checked bonds are healthy."

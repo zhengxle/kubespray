@@ -1,0 +1,77 @@
+---
+- name: 批量配置所有节点的 RoCE QoS (DSCP 映射 + PFC)
+  hosts: kube_node
+  become: yes
+  gather_facts: no
+  vars:
+    # 每个 Bond 对应的第一个物理 Slave 口（承载 RDMA 设备的那个）
+    # 如果你有新的 Bond，只需在这里增加对应的物理口名称
+    rdma_slave_devices:
+      - ens55f0np0     # bond_c0
+      - ens50f0np0     # bond_c1
+      - enp96s0f0np0   # bond_c2
+      - enp75s0f0np0   # bond_c3
+      - ens1f0np0      # bond_s0
+
+  tasks:
+    - name: 检查节点上实际存在的物理口
+      shell: |
+        for dev in {{ rdma_slave_devices | join(' ') }}; do
+          if [ -d "/sys/class/net/$dev" ]; then
+            echo "$dev"
+          fi
+        done
+      register: existing_devices
+      changed_when: false
+
+    - name: 显示将要配置的物理口
+      debug:
+        msg: "节点 {{ inventory_hostname }} 上将配置以下物理口: {{ existing_devices.stdout_lines }}"
+
+    - name: 配置 DSCP 0 -> Priority 5 映射
+      shell: |
+        mlnx_qos -i {{ item }} --dscp2prio set,0,5
+      loop: "{{ existing_devices.stdout_lines }}"
+      register: dscp0_result
+      changed_when: "'dscp2prio mapping' in dscp0_result.stdout"
+      failed_when: false
+
+    - name: 配置 DSCP 40 -> Priority 5 映射
+      shell: |
+        mlnx_qos -i {{ item }} --dscp2prio set,40,5
+      loop: "{{ existing_devices.stdout_lines }}"
+      register: dscp40_result
+      changed_when: "'dscp2prio mapping' in dscp40_result.stdout"
+      failed_when: false
+
+    - name: 验证每个物理口的 dscp2prio 映射
+      shell: |
+        mlnx_qos -i {{ item }} | grep -A3 "dscp2prio mapping"
+      loop: "{{ existing_devices.stdout_lines }}"
+      register: verify_result
+      changed_when: false
+      failed_when: false
+
+    - name: 打印验证结果
+      debug:
+        msg: |
+          ===== {{ item.item }} =====
+          {{ item.stdout }}
+      loop: "{{ verify_result.results }}"
+      when: item.stdout is defined and item.stdout != ""
+
+    - name: 验证 PFC 状态 (Priority 5 是 enabled)
+      shell: |
+        mlnx_qos -i {{ item }} | grep -A2 "PFC configuration"
+      loop: "{{ existing_devices.stdout_lines }}"
+      register: pfc_result
+      changed_when: false
+      failed_when: false
+
+    - name: 打印 PFC 状态
+      debug:
+        msg: |
+          ===== {{ item.item }} PFC =====
+          {{ item.stdout }}
+      loop: "{{ pfc_result.results }}"
+      when: item.stdout is defined and item.stdout != ""

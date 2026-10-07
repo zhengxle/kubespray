@@ -1,0 +1,50 @@
+---
+- name: 部署 RoCE Ring Buffer 持久化配置
+  hosts: kube_node
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: 拷贝调优脚本
+      copy:
+        src: extra_playbooks/files/roce-ringbuffer.sh
+        dest: /usr/local/sbin/roce-ringbuffer.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: 拷贝 systemd service
+      copy:
+        src: extra_playbooks/files/roce-ringbuffer.service
+        dest: /etc/systemd/system/roce-ringbuffer.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: 重新加载 systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: 启用并启动 roce-ringbuffer 服务
+      systemd:
+        name: roce-ringbuffer
+        enabled: yes
+        state: started
+
+    - name: 查看服务状态
+      command: systemctl status roce-ringbuffer --no-pager
+      register: svc_status
+      changed_when: false
+
+    - name: 打印服务状态
+      debug:
+        var: svc_status.stdout_lines
+
+    - name: 查看调优日志
+      command: cat /var/log/roce-ringbuffer.log
+      register: rb_log
+      changed_when: false
+
+    - name: 打印调优日志
+      debug:
+        var: rb_log.stdout_lines

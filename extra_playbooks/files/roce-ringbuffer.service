@@ -1,0 +1,14 @@
+[Unit]
+Description=RoCE Ring Buffer Persistence
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/roce-ringbuffer.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

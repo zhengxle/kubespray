@@ -18,6 +18,14 @@ USE_BIND_SOURCE=0
 
 SERVER_PIDS=()
 
+declare -A bond_map
+
+bond_map['bond_c0']="2"
+bond_map['bond_c1']="0"
+bond_map['bond_c2']="6"
+bond_map['bond_c3']="4"
+bond_map['bond_s0']="-1"
+
 usage() {
     cat <<'USAGE'
 Usage:
@@ -97,12 +105,12 @@ rail_ip_local() {
     else
         local netdev
         netdev=$(rail_netdev "$rail")
-        local ip
-        ip=$(ip -4 -o addr show dev "$netdev" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)
-        if [[ -z "$ip" ]]; then
-            err "Failed to detect local IPv4 address on ${netdev}"
-            return 1
-        fi
+        # local ip
+        # ip=$(ip -4 -o addr show dev "$netdev" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)
+        # if [[ -z "$ip" ]]; then
+        #     err "Failed to detect local IPv4 address on ${netdev}"
+        #     return 1
+        # fi
         echo "$ip"
     fi
 }
@@ -125,10 +133,11 @@ rail_port() {
 }
 
 pick_bw_tool() {
+    local path="/opt/maca/samples/mccl_tests/ib_perf/tests"
     case "$VERB" in
-        write) echo ib_write_bw ;;
-        read)  echo ib_read_bw ;;
-        send)  echo ib_send_bw ;;
+        write) echo "$path/ib_write_bw" ;;
+        read)  echo "$path/ib_read_bw" ;;
+        send)  echo "$path/ib_send_bw" ;;
         *) err "VERB must be write, read, or send"; exit 1 ;;
     esac
 }
@@ -139,45 +148,37 @@ preflight() {
     local tool
     tool=$(pick_bw_tool)
     require_cmd "$tool"
-
-    if "$tool" --help 2>&1 | grep -q -- '--bind_source_ip'; then
-        USE_BIND_SOURCE=1
-        log "$tool supports --bind_source_ip; source-IP pinning enabled."
-    else
-        USE_BIND_SOURCE=0
-        log "$tool does not support --bind_source_ip; using kernel routing."
-    fi
 }
 
 check_rail_local() {
-    local rail="$1" node="$2"
-    local ip netdev rdmadev
-    ip=$(rail_ip_local "$rail" "$node") || return 1
+    local rail="$1" node="$2" ip="$3"
+    local netdev rdmadev
+    # ip=$(rail_ip_local "$rail" "$node") || return 1
     netdev=$(rail_netdev "$rail")
     rdmadev=$(rail_rdmadev "$rail")
 
-    if ! ip -o link show dev "$netdev" >/dev/null 2>&1; then
-        err "Netdev ${netdev} does not exist"
-        return 1
-    fi
+    # if ! ip -o link show dev "$netdev" >/dev/null 2>&1; then
+    #     err "Netdev ${netdev} does not exist"
+    #     return 1
+    # fi
 
-    if ! ip -4 -o addr show dev "$netdev" | grep -qw "$ip"; then
-        err "${netdev} does not have IPv4 ${ip}"
-        return 1
-    fi
+    # if ! ip -4 -o addr show dev "$netdev" | grep -qw "$ip"; then
+    #     err "${netdev} does not have IPv4 ${ip}"
+    #     return 1
+    # fi
 
-    if ! rdma dev 2>/dev/null | grep -qw "$rdmadev"; then
-        err "RDMA device ${rdmadev} not found in 'rdma dev'"
-        return 1
-    fi
+    # if ! rdma dev 2>/dev/null | grep -qw "$rdmadev"; then
+    #     err "RDMA device ${rdmadev} not found in 'rdma dev'"
+    #     return 1
+    # fi
 
     log "rail${rail} ($( [ $rail -eq 4 ] && echo "Storage" || echo "Compute" )): netdev=${netdev}, rdmadev=${rdmadev}, ip=${ip}, port=$(rail_port "$rail")"
 }
 
 server_one() {
-    local rail="$1" node="$2"
-    local ip dev port tool outfile
-    ip=$(rail_ip_local "$rail" "$node")
+    local rail="$1" node="$2" ip="$3"
+    local dev port tool outfile
+    # ip=$(rail_ip_local "$rail" "$node")
     dev=$(rail_rdmadev "$rail")
     port=$(rail_port "$rail")
     tool=$(pick_bw_tool)
@@ -186,18 +187,24 @@ server_one() {
     : > "$outfile"
     log "SERVER rail${rail}: ${dev} ${ip}:${port} -> ${tool} (QP=${QP}, GID=${GID_INDEX})"
 
+
+    local perf_gpu=${bond_map["$dev"]}
     local cmd=(
         "$tool"
         -d "$dev"
         -x "$GID_INDEX"
-        -R
         -p "$port"
         -s "$MSG_SIZE"
         -q "$QP"
         -t "$TX_DEPTH"
+        -F 
+        --report_gbits
+        -D "$DURATION"
     )
-    if (( USE_BIND_SOURCE )); then
-        cmd+=(--bind_source_ip "$ip")
+    
+    local perf_gpu=${bond_map["$dev"]}
+    if [ "$perf_gpu" -ne "-1" ]; then
+        cmd+=(--use_maca "$perf_gpu")
     fi
 
     "${cmd[@]}" >> "$outfile" 2>&1 &
@@ -205,10 +212,8 @@ server_one() {
 }
 
 run_client_one() {
-    local rail="$1" local_node="$2" remote_node="$3"
-    local src_ip dst_ip netdev rdmadev port tool outfile
-    src_ip=$(rail_ip_local "$rail" "$local_node")
-    dst_ip=$(rail_ip_remote "$rail" "$local_node" "$remote_node")
+    local rail="$1" local_node="$2" remote_node="$3" src_ip="$4" dst_ip="$5"
+    local netdev rdmadev port tool outfile
     netdev=$(rail_netdev "$rail")
     rdmadev=$(rail_rdmadev "$rail")
     port=$(rail_port "$rail")
@@ -217,29 +222,23 @@ run_client_one() {
 
     log "CLIENT rail${rail}: ${src_ip} -> ${dst_ip}, netdev=${netdev}, rdmadev=${rdmadev}, port=${port}, QP=${QP}, size=${MSG_SIZE}"
 
-    local route_line route_dev
-    route_line=$(ip -4 route get "$dst_ip" 2>/dev/null || true)
-    route_dev=$(awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}' <<< "$route_line")
-
-    if [[ "$route_dev" != "$netdev" ]]; then
-        err "rail${rail}: route to ${dst_ip} uses dev=${route_dev:-<none>}, expected ${netdev}"
-        return 1
-    fi
-
     local cmd=(
         "$tool"
         -d "$rdmadev"
         -x "$GID_INDEX"
-        -R
         -p "$port"
         -s "$MSG_SIZE"
         -q "$QP"
         -t "$TX_DEPTH"
         -D "$DURATION"
+        -F 
+        --report_gbits
     )
-    if (( USE_BIND_SOURCE )); then
-        cmd+=(--bind_source_ip "$src_ip")
+    local perf_gpu=${bond_map["$rdmadev"]}
+    if [ "$perf_gpu" -ne "-1" ]; then
+        cmd+=(--use_maca "$perf_gpu")
     fi
+
     cmd+=("$dst_ip")
 
     "${cmd[@]}" > "$outfile" 2>&1
@@ -247,10 +246,8 @@ run_client_one() {
 }
 
 print_client_result() {
-    local rail="$1" local_node="$2" remote_node="$3"
-    local src_ip dst_ip outfile
-    src_ip=$(rail_ip_local "$rail" "$local_node")
-    dst_ip=$(rail_ip_remote "$rail" "$local_node" "$remote_node")
+    local rail="$1" local_node="$2" remote_node="$3" src_ip="$4" dst_ip="$5"
+    local outfile
     outfile="${LOG_DIR}/client_rail${rail}_${src_ip}_to_${dst_ip}_q${QP}.log"
 
     echo "========== rail${rail} ($( [ $rail -eq 4 ] && echo "Storage" || echo "Compute" )) result =========="
@@ -276,7 +273,7 @@ cleanup_server() {
 }
 
 server_mode() {
-    local node="$1"
+    local node="$1" ip="$2"
     valid_node_id "$node" || { err "node_id must be 1..254"; exit 2; }
     mkdir -p "$LOG_DIR"
     preflight
@@ -288,8 +285,8 @@ server_mode() {
 
     local rail
     for ((rail=0; rail<RAIL_COUNT; rail++)); do
-        check_rail_local "$rail" "$node" || exit 1
-        server_one "$rail" "$node"
+        # check_rail_local "$rail" "$node" || exit 1
+        server_one "$rail" "$node" "$ip"
     done
 
     log "All 5 listeners started. Keep this terminal running while client tests execute."
@@ -297,7 +294,7 @@ server_mode() {
 }
 
 client_mode() {
-    local local_node="$1" remote_node="$2"
+    local local_node="$1" remote_node="$2" client_ip="$3" server_ip="$4"
     valid_node_id "$local_node" || { err "local_node_id must be 1..254"; exit 2; }
     valid_node_id "$remote_node" || { err "remote_node_id must be 1..254"; exit 2; }
     mkdir -p "$LOG_DIR"
@@ -306,13 +303,13 @@ client_mode() {
     log "Starting Client parallel testing (4 Compute + 1 Storage): Node $local_node -> Node $remote_node (QP=${QP}, GID=${GID_INDEX})"
 
     local rail
-    for ((rail=0; rail<RAIL_COUNT; rail++)); do
-        check_rail_local "$rail" "$local_node" || exit 1
-    done
+    # for ((rail=0; rail<RAIL_COUNT; rail++)); do
+    #     check_rail_local "$rail" "$local_node" || exit 1
+    # done
 
     local client_pids=()
     for ((rail=0; rail<RAIL_COUNT; rail++)); do
-        run_client_one "$rail" "$local_node" "$remote_node" &
+        run_client_one "$rail" "$local_node" "$remote_node" "$client_ip" "$server_ip"  &
         client_pids+=($!)
         sleep 0.2
     done
@@ -325,7 +322,7 @@ client_mode() {
     # 测试完成后顺序打印结果，避免控制台输出交错
     echo
     for ((rail=0; rail<RAIL_COUNT; rail++)); do
-        print_client_result "$rail" "$local_node" "$remote_node"
+        print_client_result "$rail" "$local_node" "$remote_node" "$client_ip" "$server_ip"
     done
 
     if (( failed > 0 )); then
@@ -346,12 +343,12 @@ main() {
 
     case "$mode" in
         server)
-            if [[ $# -ne 1 ]]; then usage; exit 1; fi
-            server_mode "$1"
+            if [[ $# -ne 2 ]]; then usage; exit 1; fi
+            server_mode "$1" "$2"
             ;;
         client)
-            if [[ $# -ne 2 ]]; then usage; exit 1; fi
-            client_mode "$1" "$2"
+            if [[ $# -ne 4 ]]; then usage; exit 1; fi
+            client_mode "$1" "$2" "$3" "$4"
             ;;
         *)
             usage

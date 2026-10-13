@@ -25,12 +25,13 @@
   gather_facts: no
   vars:
     server_node_id: "{{ inventory_hostname | regex_replace('^gpu-node-0*|^node0*', '') | int }}"
+    server_ip: "{{ hostvars[inventory_hostname]['ansible_host'] |default(inventory_hostname) }}"
     qp_val: "{{ qp | default(qps | default(8)) }}"
     duration_val: "{{ duration | default(30) }}"
   tasks:
     - name: 后台启动 RDMA Server
       shell: |
-        nohup ./rdma_rail_bw_test.sh server {{ server_node_id }} > /tmp/rdma_server.log 2>&1 &
+        nohup ./rdma_rail_bw_test.sh server {{ server_node_id }} {{ server_ip }} > /tmp/rdma_server.log 2>&1 &
       args:
         chdir: /mnt/nfs_data/rdma_rail_test
       environment:
@@ -49,11 +50,13 @@
   vars:
     client_node_id: "{{ inventory_hostname | regex_replace('^gpu-node-0*|^node0*', '') | int }}"
     server_node_id: "{{ hostvars[target_server]['inventory_hostname'] | regex_replace('^gpu-node-0*|^node0*', '') | int }}"
+    server_ip: "{{ hostvars[target_server]['ansible_host'] |default(target_server) }}"
+    client_ip: "{{ hostvars[inventory_hostname]['ansible_host'] |default(inventory_hostname) }}"
     qp_val: "{{ qp | default(qps | default(8)) }}"
     duration_val: "{{ duration | default(30) }}"
   tasks:
     - name: 执行 Client 并行 Rail 测试
-      command: "./rdma_rail_bw_test.sh client {{ client_node_id }} {{ server_node_id }}"
+      command: "./rdma_rail_bw_test.sh client {{ client_node_id }} {{ server_node_id }} {{ client_ip }} {{ server_ip }}"
       args:
         chdir: /mnt/nfs_data/rdma_rail_test
       environment:

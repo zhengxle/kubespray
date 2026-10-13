@@ -85,7 +85,7 @@ class PerfTestRunner:
             raise
 
     def create_remote_directories(self):
-        cmd = "mkdir -p ./rping; rm -f -R ./rping/*"
+        cmd = "mkdir -p ~/rping; rm -f -R ~/rping/*"
         logging.info("在远程节点上创建rping目录")
         def create_host(host):
             self._ssh_execute(host, cmd)
@@ -98,13 +98,14 @@ class PerfTestRunner:
         os.makedirs(local_dir, exist_ok=True)
         logging.info("开始收集log文件")
         def transfer_host(host):
-            remote_path = f"{host}:./rping/*"
+            remote_path = f"{host}:~/rping/*"
             local_path = os.path.join(local_dir, host)
             os.makedirs(local_path, exist_ok=True)
             scp_cmd = (
                 f"scp -P {self.config.ssh_port} "
                 f"-o StrictHostKeyChecking=no -r {remote_path} {local_path}/"
             )
+            print(scp_cmd)
             try:
                 subprocess.run(
                     scp_cmd,
@@ -280,6 +281,7 @@ class PerfTestRunner:
         sanitized_cmd = shlex.quote(command)
         ssh_cmd = f"ssh -o StrictHostKeyChecking=no {host} {sanitized_cmd}"
         try:
+            print(ssh_cmd)
             result = subprocess.run(
                 ssh_cmd,
                 shell=True,
@@ -301,12 +303,12 @@ class PerfTestRunner:
                     raise ValueError("无可用端口")
                 port = self.port_pool.pop()
             result_file = f"{self.result_dir}/{client_ip}_{intf}__{server_ip}_{intf}.txt"
-            client_result_file = f"./rping/{client_ip}_{intf}__{server_ip}_{intf}.txt"
+            client_result_file = f"~/rping/{client_ip}_{intf}__{server_ip}_{intf}.txt"
             # 修改服务器端命令，添加flock
             server_cmd = (
                 f"nohup flock /tmp/ib_write_bw_{intf}.lock -c "
                 f"'ib_write_bw -d {intf} -F -p {port} -s 65535 -x 3 --report_gbits' "
-                f"> /dev/null 2>&1 &"
+                f"> /dev/null 2>&1  ~/rping/{client_ip}_{intf}__{server_ip}_{intf}.txt> &"
             )
             self._ssh_execute(server_ip, server_cmd)
             # 修改客户端命令，添加flock
@@ -341,7 +343,7 @@ class PerfTestRunner:
                     raise ValueError("无可用端口")
                 port = self.port_pool.pop()
             result_file = f"{self.result_dir}/{client_ip}_{intf}__{server_ip}_{intf}.txt"
-            client_result_file = f"./rping/{client_ip}_{intf}__{server_ip}_{intf}.txt"
+            client_result_file = f"~/rping/{client_ip}_{intf}__{server_ip}_{intf}.txt"
             server_cmd = f"nohup /opt/maca/samples/mccl_tests/ib_perf/tests/ib_write_bw --use_maca {use_maca} -d {intf} -F -q 2 -p {port} -s 65535 -x 3 --report_gbits > /dev/null 2>&1 &"
             self._ssh_execute(server_ip, server_cmd)
             #client_cmd = f"/opt/maca/samples/mccl_tests/ib_perf/tests/ib_write_bw --use_maca {use_maca} -d {intf} -F -q 2 -p {port} -s 65535 -x 3 --report_gbits {server_ip}  > {client_result_file} 2>&1 "
@@ -372,7 +374,7 @@ class PerfTestRunner:
                     raise ValueError("无可用端口")
                 port = self.port_pool.pop()
             result_file = f"{self.result_dir}/{client_ip}_{intf}__{server_ip}_{intf}.txt"
-            client_result_file = f"./rping/{client_ip}_{intf}__{server_ip}_{intf}.txt"
+            client_result_file = f"~/rping/{client_ip}_{intf}__{server_ip}_{intf}.txt"
             server_cmd = f"nohup ib_write_bw -d {intf} -F -p {port} -s 65535 -x 3 --report_gbits > /dev/null 2>&1 &"
             self._ssh_execute(server_ip, server_cmd)
             client_cmd = f"ib_write_bw -d {intf} -F -p {port} -s 65535 -x 3 --report_gbits {server_ip}  > {client_result_file} 2>&1 "

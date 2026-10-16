@@ -105,7 +105,7 @@ class PerfTestRunner:
                 f"scp -P {self.config.ssh_port} "
                 f"-o StrictHostKeyChecking=no -r {remote_path} {local_path}/"
             )
-            print(scp_cmd)
+            #print(scp_cmd)
             try:
                 subprocess.run(
                     scp_cmd,
@@ -281,7 +281,7 @@ class PerfTestRunner:
         sanitized_cmd = shlex.quote(command)
         ssh_cmd = f"ssh -o StrictHostKeyChecking=no {host} {sanitized_cmd}"
         try:
-            print(ssh_cmd)
+            #print(ssh_cmd)
             result = subprocess.run(
                 ssh_cmd,
                 shell=True,

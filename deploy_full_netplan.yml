@@ -28,7 +28,7 @@
         src: "/mnt/nfs_data/netplan_configs/{{ item.prefix }}-{{ serial_number.stdout | trim }}.yaml"
         dest: "/etc/netplan/{{ item.prefix }}-{{ serial_number.stdout | trim }}.yaml"
         remote_src: true
-        mode: "0644"
+        mode: "0600"
       loop:
         - { prefix: "01-business" }
         - { prefix: "02-compute" }

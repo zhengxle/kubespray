@@ -86,7 +86,7 @@ def run_test(group, test_bin, log_dir):
             #'bash', '-c',
             #f'ulimit -n 1000000 && /opt/maca/samples/mccl_tests/perf/mccl_perf/{test_bin} -b 1K -e 8G -d float -f 2 -g 1 -n 10'
         ]
-        #print(' '.join(cmd))
+        print(' '.join(cmd))
         result = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,

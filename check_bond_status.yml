@@ -1,8 +1,8 @@
 ---
-- name: Check and filter abnormal Bond interfaces
-  hosts: kube_node # 替换为你的目标主机组，如 compute_nodes
+- name: Check and filter abnormal Bond interfaces and NIC hardware
+  hosts: kube_node
   gather_facts: no
-  become: yes # 读取 /proc 和执行 ip 命令通常需要 root 权限
+  become: yes
 
   vars:
     # 定义需要检查的所有 bond 接口
@@ -14,7 +14,14 @@
       - bond_storage0
       - bond0
 
+    # 要求的最低驱动版本
+    min_fwpkg_ver: "235.2.97.0"
+    min_l2drv_ver: "235.2.96.0"
+
   tasks:
+    # ============================================================
+    # 第一部分：Bond 接口健康检查（原有逻辑）
+    # ============================================================
     - name: Execute bond health check script on remote nodes
       shell: |
         #!/bin/bash
@@ -49,7 +56,6 @@
             fi
 
             # 5. 遍历每个 Slave 网卡进行细节检查
-            # 使用 awk 按 "Slave Interface" 分割文本块
             awk -v bond="$bond" '
                 /^Slave Interface:/ {
                     if (iface != "" && iface != "none") {
@@ -81,15 +87,88 @@
         done
       register: bond_check_output
       changed_when: false
-      failed_when: false # 即使有异常，也不希望 Ansible 任务直接失败中断
+      failed_when: false
 
-    - name: Generate report of abnormal nodes
-      # 当输出中包含 ABNORMAL 关键字时触发
+    - name: Generate report of abnormal Bond interfaces
       when: "'ABNORMAL' in bond_check_output.stdout"
       debug:
         msg: "{{ bond_check_output.stdout_lines | select('search', 'ABNORMAL') | list }}"
 
-    - name: Print success message if no abnormalities found
-      when: "'ABNORMAL' not in bond_check_output.stdout"
+    # ============================================================
+    # 第二部分：NIC 硬件检查（新增）—— PCIe带宽 + 驱动版本
+    # ============================================================
+    - name: Check NIC PCIe bandwidth and driver versions
+      shell: |
+        #!/bin/bash
+        # 版本比较函数：返回0表示 ver1 >= ver2
+        version_ge() {
+            local ver1="$1"
+            local ver2="$2"
+
+            # sort -V 按版本号排序，取最大值
+            local max_ver
+            max_ver=$(printf '%s\n%s\n' "$ver1" "$ver2" | sort -V | tail -n1)
+            if [ "$max_ver" = "$ver1" ]; then
+                return 0
+            else
+                return 1
+            fi
+        }
+
+        # 检查 /usr/local/bin/bnxtdev 命令是否存在
+        if [! -x /usr/local/bin/bnxtdev ]; then
+            echo "ABNORMAL|/usr/local/bin/bnxtdev|Command /usr/local/bin/bnxtdev not found"
+            exit 0
+        fi
+
+        # 运行 /usr/local/bin/bnxtdev 获取网卡信息
+        BNXT_OUTPUT=$(/usr/local/bin/bnxtdev 2>/dev/null)
+
+        if [ -z "$BNXT_OUTPUT" ]; then
+            echo "ABNORMAL|/usr/local/bin/bnxtdev|Command /usr/local/bin/bnxtdev returned no output"
+            exit 0
+        fi
+
+        # 跳过标题行，逐行解析
+        # 列顺序: DEVICE_TYPE PCIE_BDF RDMA BOND NET NUMA NET_RATE PCIE_RATE MTU CARD_TYPE FWPKG_VER L2DRV_VER
+        echo "$BNXT_OUTPUT" | tail -n +2 | while read -r DEVICE_TYPE PCIE_BDF RDMA BOND NET NUMA NET_RATE PCIE_RATE MTU CARD_TYPE FWPKG_VER L2DRV_VER; do
+
+            # --- 检查 1: PCIe 带宽是否为 32.0Gx16 ---
+            if [ "$PCIE_RATE" != "32.0Gx16" ]; then
+                echo "ABNORMAL|/usr/local/bin/bnxtdev|PCIE $PCIE_BDF ($NET) PCIe_RATE=$PCIE_RATE (expected 32.0Gx16)"
+            fi
+
+            # --- 检查 2: FWPKG_VER 版本是否满足最低要求 ---
+            if [ -n "$FWPKG_VER" ]; then
+                if ! version_ge "$FWPKG_VER" "{{ min_fwpkg_ver }}"; then
+                    echo "ABNORMAL|/usr/local/bin/bnxtdev|PCIE $PCIE_BDF ($NET) FWPKG_VER=$FWPKG_VER is below required {{ min_fwpkg_ver }}"
+                fi
+            else
+                echo "ABNORMAL|/usr/local/bin/bnxtdev|PCIE $PCIE_BDF ($NET) FWPKG_VER is empty"
+            fi
+
+            # --- 检查 3: L2DRV_VER 版本是否满足最低要求 ---
+            if [ -n "$L2DRV_VER" ]; then
+                if ! version_ge "$L2DRV_VER" "{{ min_l2drv_ver }}"; then
+                    echo "ABNORMAL|/usr/local/bin/bnxtdev|PCIE $PCIE_BDF ($NET) L2DRV_VER=$L2DRV_VER is below required {{ min_l2drv_ver }}"
+                fi
+            else
+                echo "ABNORMAL|/usr/local/bin/bnxtdev|PCIE $PCIE_BDF ($NET) L2DRV_VER is empty"
+            fi
+        done
+      register: bnxtdev_check_output
+      changed_when: false
+      failed_when: false
+
+    - name: Generate report of abnormal NIC hardware
+      when: "'ABNORMAL' in bnxtdev_check_output.stdout"
       debug:
-        msg: "Host {{ inventory_hostname }}: All checked bonds are healthy."
+        msg: "{{ bnxtdev_check_output.stdout_lines | select('search', 'ABNORMAL') | list }}"
+
+    # ============================================================
+    # 第三部分：汇总输出
+    # ============================================================
+    - name: Print success message if no abnormalities found
+      when: "'ABNORMAL' not in bond_check_output.stdout and 'ABNORMAL' not in bnxtdev_check_output.stdout"
+      debug:
+        msg: "Host {{ inventory_hostname }}: All checked bonds and NIC hardware (PCIe bandwidth + driver versions) are healthy."

@@ -1,8 +1,8 @@
 #!/bin/bash
-START_NODE=1
-END_NODE=128
+START_NODE=172
+END_NODE=179
 INVENTORY="inventory/my-cluster/hosts.yml"
-MAX_PARALLEL=4
+MAX_PARALLEL=8
 
 run_test() {
     local c_num=$1

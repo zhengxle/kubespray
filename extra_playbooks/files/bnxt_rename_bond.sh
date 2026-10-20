@@ -4,14 +4,15 @@ set -u
 
 # 定义计算网卡与存储网卡的映射关系: [netdev接口名]="期望的RDMA设备名"
 declare -A NAME_MAP=(
+    # mxshmem 要求网卡必须以bnxt开头
     # 计算网卡
-    ["bond_compute0"]="bond_c0"
-    ["bond_compute1"]="bond_c1"
-    ["bond_compute2"]="bond_c2"
-    ["bond_compute3"]="bond_c3"
+    ["bond_compute0"]="bnxt_bond_c0"
+    ["bond_compute1"]="bnxt_bond_c1"
+    ["bond_compute2"]="bnxt_bond_c2"
+    ["bond_compute3"]="bnxt_bond_c3"
 
     # 存储网卡
-    ["bond_storage0"]="bond_s0"
+    ["bond_storage0"]="bnxt_bond_s0"
 )
 
 RDMA_CMD="/opt/mellanox/iproute2/sbin/rdma"

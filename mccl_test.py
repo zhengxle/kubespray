@@ -72,7 +72,7 @@ def run_test(group, test_bin, log_dir):
             '-mca', 'osc', '^ucx',
             '-mca', 'btl', '^openib',
             '-mca', 'routed', 'direct',
-            '-x', 'MCCL_IB_HCA=bond_c0,bond_c1,bond_c2,bond_c3',
+            '-x', 'MCCL_IB_HCA=bnxt_bond_c0,bnxt_bond_c1,bnxt_bond_c2,bnxt_bond_c3',
             '-x', 'MCCL_SOCKET_IFNAME=bond0',
             '-x', 'LD_LIBRARY_PATH=/opt/maca/lib:/opt/maca/ompi/lib',
             '-x', 'MCCL_IB_TC=160',

@@ -104,7 +104,7 @@ def run_test(iter_idx, log_file, alg, card_num, host_ip,
 def mccl_cluster_stress(duration_sec, alg, card_num, host_ip):
     maca_path = "/opt/maca"
     ip_mask = "bond0"
-    ib_port = "bond_c0,bond_c1,bond_c2,bond_c3"
+    ib_port = "bnxt_bond_c0,bnxt_bond_c1,bnxt_bond_c2,bnxt_bond_c3"
     nic_name = "bond0"
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")

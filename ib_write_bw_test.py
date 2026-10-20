@@ -61,7 +61,7 @@ class PerfTestConfig:
             print(f"Error: File '{self.ip_file_path}' not found. Using default node list.")
             self.node_list = [f"10.200.146.{idx}" for idx in range(14, 28)]
         self.network_interfaces = (
-            'bond_c0', 'bond_c1', 'bond_c2', 'bond_c3'
+            'bnxt_bond_c0', 'bnxt_bond_c1', 'bnxt_bond_c2', 'bnxt_bond_c3'
         )
         self.min_port = 40000
         self.max_port = 60000
@@ -331,10 +331,10 @@ class PerfTestRunner:
         port = None
         #time.sleep(sl)
         intf_to_maca = {
-          "bond_c0": 2,
-          "bond_c1": 0,
-          "bond_c2": 6,
-          "bond_c3": 4
+          "bnxt_bond_c0": 2,
+          "bnxt_bond_c1": 0,
+          "bnxt_bond_c2": 6,
+          "bnxt_bond_c3": 4
         }
         use_maca = intf_to_maca.get(intf, 0)  # 默认 use_maca=0，如果接口未知
         try:

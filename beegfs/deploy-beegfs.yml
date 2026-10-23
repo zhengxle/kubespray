@@ -1,0 +1,24 @@
+---
+- name: 准备所有节点的通用环境与依赖包安装
+  hosts: mgmtd:meta:storage
+  become: true
+  roles:
+    - common
+
+- name: 部署 BeeGFS 管理服务器 (mgmtd)
+  hosts: mgmtd
+  become: true
+  roles:
+    - mgmtd
+
+- name: 部署 BeeGFS 元数据服务器 (meta)
+  hosts: meta
+  become: true
+  roles:
+    - meta
+
+- name: 部署 BeeGFS 存储服务器 (storage)
+  hosts: storage
+  become: true
+  roles:
+    - storage

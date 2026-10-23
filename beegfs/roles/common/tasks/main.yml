@@ -1,0 +1,24 @@
+---
+- name: 创建 BeeGFS 配置及日志目录
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /etc/beegfs
+    - /var/log/beegfs
+
+- name: 安装基础工具包 (crudini 等)
+  apt:
+    name:
+      - crudini
+      - xfsprogs
+    state: present
+    update_cache: yes
+
+- name: 安装 beegfs-common 和 libbeegfs-ib
+  apt:
+    deb: "{{ item }}"
+  loop:
+    - "{{ beegfs_pkg_dir }}/beegfs-common_7.4.6_amd64.deb"
+    - "{{ beegfs_pkg_dir }}/libbeegfs-ib_7.4.6_amd64.deb"

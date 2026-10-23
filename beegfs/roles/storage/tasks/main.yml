@@ -1,0 +1,129 @@
+---
+- name: 安装 beegfs-storage
+  apt:
+    deb: "{{ beegfs_pkg_dir }}/beegfs-storage_7.4.6_amd64.deb"
+
+- name: 确保格式化前目标分区已安全卸载
+  mount:
+    path: "{{ item.mnt }}"
+    state: unmounted
+  loop: "{{ targets }}"
+  ignore_errors: yes
+
+- name: 格式化存储目标卷 (xfs)
+  filesystem:
+    fstype: xfs
+    dev: "{{ item.dev }}"
+    opts: "-l version=2,su=256k"
+    force: yes
+  loop: "{{ targets }}"
+  register: xfs_formatted
+
+- name: 创建存储目标挂载目录
+  file:
+    path: "{{ item.mnt }}"
+    state: directory
+  loop: "{{ targets }}"
+
+- name: 挂载存储卷并加入 fstab
+  mount:
+    path: "{{ item.mnt }}"
+    src: "{{ item.dev }}"
+    fstype: xfs
+    opts: "sync,noatime,nodiratime,logbufs=8,logbsize=256k,largeio,inode64,swalloc,allocsize=131072k"
+    state: mounted
+  loop: "{{ targets }}"
+
+# === 核心优化：如果该盘刚刚被重新格式化（UUID改变），自动清理旧的 storage.ini 缓存文件 ===
+- name: 清理由于重新格式化导致的旧 storage.ini 缓存
+  file:
+    path: "{{ item.mnt }}/storage.ini"
+    state: absent
+  loop: "{{ targets }}"
+
+- name: 设置当前存储节点的 NodeID
+  set_fact:
+    storage_node_num: "{{ storage_id_prefix }}"
+
+- name: 注册 Storage 存储盘到管理节点
+  command: >
+    /opt/beegfs/sbin/beegfs-setup-storage
+    -p {{ item.mnt }}
+    -s {{ storage_node_num }}
+    -i {{ item.id }}
+    -m {{ mgmtd_ip }}
+  args:
+    creates: "{{ item.mnt }}/storage.ini"
+  loop: "{{ targets }}"
+
+- name: 配置存储网卡配置文件
+  copy:
+    content: "{{ beegfs_interface }}\n"
+    dest: /etc/beegfs/beegfs-storage-conn-inf.conf
+    mode: '0644'
+
+
+
+- name: 写入 BeeGFS Storage 节点网卡配置文件
+  copy:
+    content: "{{ beegfs_interface }}\n"
+    dest: /etc/beegfs/beegfs-storage-conn-inf.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: 计算 Storage 节点动态调优参数
+  set_fact:
+    storage_num_workers: "{{ ((ansible_processor_vcpus | int) / 4) | int }}"
+    storage_stream_listeners: "{{ (((ansible_processor_vcpus | int) / 12) | int) if ((ansible_processor_vcpus | int) / 12) >= 1 else 1 }}"
+
+- name: 批量更新 beegfs-storage.conf 优化配置项
+  lineinfile:
+    path: /etc/beegfs/beegfs-storage.conf
+    regexp: "^([[:space:]]*{{ item.key }}[[:space:]]*=)[[:space:]]*.*$"
+    line: "{{ item.key }} = {{ item.value }}"
+    state: present
+  loop:
+    - { key: 'connDisableAuthentication', value: 'true' }
+    - { key: 'storeAllowFirstRunInit', value: 'false' }
+    - { key: 'connInterfacesFile', value: '/etc/beegfs/beegfs-storage-conn-inf.conf' }
+    - { key: 'tuneNumWorkers', value: "{{ storage_num_workers }}" }
+    - { key: 'tuneNumStreamListeners', value: "{{ storage_stream_listeners }}" }
+    - { key: 'connMaxInternodeNum', value: '2000' }  # 同样建议将 Storage 侧连接数放宽至 2000，匹配大规模客户端并发
+
+- name: 配置固定的 nodeID
+  copy:
+    content: "{{ node_id_name }}\n"
+    dest: /etc/beegfs/shared_storage_nodeID
+    mode: '0644'
+
+- name: 创建存储目标的 nodeID 软链接
+  file:
+    src: /etc/beegfs/shared_storage_nodeID
+    dest: "{{ item.mnt }}/nodeID"
+    state: link
+    force: yes
+  loop: "{{ targets }}"
+
+- name: 创建 systemd override 目录
+  file:
+    path: /etc/systemd/system/beegfs-storage.service.d/
+    state: directory
+
+- name: 配置 systemd 优先级 override.conf
+  copy:
+    content: |
+      [Service]
+      Nice=-20
+      IOSchedulingClass=realtime
+      IOSchedulingPriority=0
+      OOMScoreAdjust=-900
+    dest: /etc/systemd/system/beegfs-storage.service.d/override.conf
+
+- name: 启动并开机自启 beegfs-storage
+  systemd:
+    name: beegfs-storage
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+

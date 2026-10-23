@@ -1,0 +1,6 @@
+---
+- name: 批量一键部署 BeeGFS 客户端集群
+  hosts: clients
+  become: yes
+  roles:
+    - client

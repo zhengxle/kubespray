@@ -1,0 +1,108 @@
+---
+- name: 安装 beegfs-client 编译和运行基础依赖包
+  apt:
+    name:
+      - build-essential
+      - "linux-headers-{{ ansible_kernel }}"
+      - initramfs-tools
+    state: present
+    update_cache: yes
+
+- name: 安装 beegfs-client 和 beegfs-helperd 软件包
+  apt:
+    deb: "{{ item }}"
+    state: present
+  loop:
+    - "{{ beegfs_pkg_dir }}/beegfs-common_7.4.6_amd64.deb"
+    - "{{ beegfs_pkg_dir }}/beegfs-utils_7.4.6_amd64.deb"
+    - "{{ beegfs_pkg_dir }}/beegfs-helperd_7.4.6_amd64.deb"
+    - "{{ beegfs_pkg_dir }}/beegfs-client_7.4.6_all.deb"
+
+# === 1. 配置 autobuild 编译参数（适配 OFED 路径与多线程并行编译） ===
+- name: 配置 beegfs-client-autobuild.conf 编译参数
+  ini_file:
+    path: /etc/beegfs/beegfs-client-autobuild.conf
+    section: ""
+    option: "buildArgs"
+    value: "-j8 OFED_INCLUDE_PATH=/usr/src/ofa_kernel/x86_64/{{ ansible_kernel }}/include"
+  # 如果你的 OFED 路径是固定的，也可以直接写死，这里利用了 ansible_kernel 变量动态匹配
+
+# === 2. 配置 beegfs-helperd (连接管理节点 & 关闭认证) ===
+- name: 计算并获取客户端动态调优参数
+  set_fact:
+    beegfs_client_tune_workers: "{{ ((ansible_processor_vcpus | int) / 4) | int }}"
+
+- name: 配置 beegfs-helperd.conf
+  ini_file:
+    path: /etc/beegfs/beegfs-helperd.conf
+    section: ""
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+  loop:
+    - { key: 'connDisableAuthentication', value: 'true' }
+    - { key: 'connInterfacesFile', value: '/etc/beegfs/beegfs-client-conn-inf.conf' }
+    - { key: 'connRDMABufNum', value: '256' }
+    - { key: 'connRDMABufSize', value: '65536' }
+    - { key: 'tuneNumWorkers', value: "{{ beegfs_client_tune_workers }}" }
+
+# === 3. 配置 beegfs-client.conf (优化高并发 IO & 连接参数) ===
+- name: 配置 beegfs-client-conn-inf.conf 网卡绑定
+  copy:
+    content: "{{ beegfs_interface }}\n"
+    dest: /etc/beegfs/beegfs-client-conn-inf.conf
+    mode: '0644'
+
+- name: 批量更新 beegfs-client.conf 优化配置项
+  lineinfile:
+    path: /etc/beegfs/beegfs-client.conf
+    regexp: "^([[:space:]]*{{ item.key }}[[:space:]]*=)"
+    line: "{{ item.key }} = {{ item.value }}"
+    state: present
+  loop:
+    - { key: 'sysMgmtdHost', value: "{{ mgmtd_ip }}" }
+    - { key: 'connDisableAuthentication', value: 'true' }
+    - { key: 'sysMountSanityCheckMS', value: '0' }
+    - { key: 'connInterfacesFile', value: '/etc/beegfs/beegfs-client-conn-inf.conf' }
+    - { key: 'tuneNumWorkers', value: "{{ beegfs_client_tune_workers }}" }
+    - { key: 'connMaxInternodeNum', value: '128' }
+
+# === 4. 配置挂载点 (beegfs-mounts.conf) ===
+- name: 确保客户端本地挂载目录存在
+  file:
+    path: "{{ beegfs_mount_point }}"
+    state: directory
+    mode: '0755'
+
+- name: 配置 /etc/beegfs/beegfs-mounts.conf
+  copy:
+    content: "{{ beegfs_mount_point }} /etc/beegfs/beegfs-client.conf\n"
+    dest: /etc/beegfs/beegfs-mounts.conf
+    mode: '0644'
+
+# === 5. 自动编译 BeeGFS 内核模块 ===
+- name: 执行 beegfs-setup-client 编译并重build内核模块
+  command: /opt/beegfs/sbin/beegfs-setup-client -c /etc/beegfs/beegfs-client.conf
+  register: client_setup_result
+  changed_when: "'rebuild' in client_setup_result.stdout or client_setup_result.rc == 0"
+
+# === 6. 启动 beegfs-helperd & beegfs-client 服务 ===
+- name: 启动并开机自启 beegfs-helperd 助手服务
+  systemd:
+    name: beegfs-helperd
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+
+- name: 启并开机自启 beegfs-client 自动挂载服务
+  systemd:
+    name: beegfs-client
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+
+# === 7. 验证挂载状态 ===
+- name: 检查 BeeGFS 挂载点状态
+  command: mountpoint -q {{ beegfs_mount_point }}
+  register: mount_status
+  failed_when: mount_status.rc != 0
+  changed_when: false

@@ -1,0 +1,12 @@
+[Unit]
+Description=Broadcom NIC RDMA Service
+After=network-online.target rdma-ndd.service
+Wants=rdma-ndd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env python3 /usr/local/bin/bcmRdmaSvc.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

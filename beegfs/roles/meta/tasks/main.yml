@@ -1,0 +1,101 @@
+---
+- name: 安装 beegfs-meta
+  apt:
+    deb: "{{ beegfs_pkg_dir }}/beegfs-meta_7.4.6_amd64.deb"
+
+- name: 格式化元数据底层盘 (ext4)
+  filesystem:
+    fstype: ext4
+    dev: "{{ meta_dev }}"
+    opts: "-I 512"
+
+- name: 创建元数据挂载点
+  file:
+    path: "{{ meta_mount }}"
+    state: directory
+
+- name: 挂载元数据存储盘
+  mount:
+    path: "{{ meta_mount }}"
+    src: "{{ meta_dev }}"
+    fstype: ext4
+    opts: "noatime,nodiratime,defaults"
+    state: mounted
+
+- name: 初始化 BeeGFS 元数据服务
+  command: >
+    /opt/beegfs/sbin/beegfs-setup-meta
+    -p {{ meta_mount }}/meta/
+    -s {{ service_id }}
+    -m {{ mgmtd_ip }}
+    -f
+  args:
+    creates: "{{ meta_mount }}/meta/meta.ini"
+
+- name: 配置 RDMA 网卡配置文件
+  copy:
+    content: "{{ beegfs_interface }}\n"
+    dest: /etc/beegfs/beegfs-meta-conn-inf.conf
+    mode: '0644'
+
+- name: 写入 BeeGFS Meta 节点网卡配置文件
+  copy:
+    content: "{{ beegfs_interface }}\n"
+    dest: /etc/beegfs/beegfs-meta-conn-inf.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: 计算 Meta 节点动态调优参数
+  set_fact:
+    meta_num_workers: "{{ ((ansible_processor_vcpus | int) / 4) | int }}"
+    meta_stream_listeners: "{{ (((ansible_processor_vcpus | int) / 12) | int) if ((ansible_processor_vcpus | int) / 12) >= 1 else 1 }}"
+
+- name: 批量更新 beegfs-meta.conf 优化配置项
+  lineinfile:
+    path: /etc/beegfs/beegfs-meta.conf
+    regexp: "^([[:space:]]*{{ item.key }}[[:space:]]*=)[[:space:]]*.*$"
+    line: "{{ item.key }} = {{ item.value }}"
+    state: present
+  loop:
+    - { key: 'connDisableAuthentication', value: 'true' }
+    - { key: 'storeAllowFirstRunInit', value: 'false' }
+    - { key: 'connInterfacesFile', value: '/etc/beegfs/beegfs-meta-conn-inf.conf' }
+    - { key: 'tuneNumWorkers', value: "{{ meta_num_workers }}" }
+    - { key: 'tuneNumStreamListeners', value: "{{ meta_stream_listeners }}" }
+    - { key: 'connMaxInternodeNum', value: '2000' }  # 同时建议将 Meta 侧的并发连接数放大，匹配客户端的大规模需求
+
+- name: 配置固定的 nodeID
+  copy:
+    content: "{{ node_id_name }}\n"
+    dest: /etc/beegfs/meta_nodeID
+    mode: '0644'
+
+- name: 创建 nodeID 软链接
+  file:
+    src: /etc/beegfs/meta_nodeID
+    dest: "{{ meta_mount }}/meta/nodeID"
+    state: link
+    force: yes
+
+- name: 创建 systemd override 目录
+  file:
+    path: /etc/systemd/system/beegfs-meta.service.d/
+    state: directory
+
+- name: 配置 systemd 优先级 override.conf
+  copy:
+    content: |
+      [Service]
+      Nice=-20
+      IOSchedulingClass=realtime
+      IOSchedulingPriority=0
+      OOMScoreAdjust=-900
+    dest: /etc/systemd/system/beegfs-meta.service.d/override.conf
+
+- name: 启动并开机自启 beegfs-meta
+  systemd:
+    name: beegfs-meta
+    state: restarted
+    enabled: yes
+    daemon_reload: yes

@@ -1,0 +1,94 @@
+---
+- name: 安装 beegfs-mgmtd 和 beegfs-utils
+  apt:
+    deb: "{{ item }}"
+  loop:
+    - "{{ beegfs_pkg_dir }}/beegfs-mgmtd_7.4.6_amd64.deb"
+    - "{{ beegfs_pkg_dir }}/beegfs-utils_7.4.6_amd64.deb"
+
+- name: 格式化管理服务底层盘 (ext4)
+  filesystem:
+    fstype: ext4
+    dev: "{{ mgmtd_dev }}"
+    opts: "-I 512"
+
+- name: 创建管理服务挂载点
+  file:
+    path: "{{ mgmtd_mount }}"
+    state: directory
+
+- name: 挂载管理服务存储盘
+  mount:
+    path: "{{ mgmtd_mount }}"
+    src: "{{ mgmtd_dev }}"
+    fstype: ext4
+    opts: "noatime,nodiratime,defaults"
+    state: mounted
+
+- name: 初始化 BeeGFS 管理服务目录
+  command: >
+    /opt/beegfs/sbin/beegfs-setup-mgmtd
+    -p {{ mgmtd_mount }}/mgmtd/
+    -f
+  args:
+    creates: "{{ mgmtd_mount }}/mgmtd/mgmtd.ini"
+
+- name: 配置网络接口文件
+  copy:
+    content: "{{ beegfs_interface }}\n"
+    dest: /etc/beegfs/beegfs-mgmtd-conn-inf.conf
+    mode: '0644'
+
+- name: 动态计算服务端调优参数
+  set_fact:
+    calculated_num_workers: "{{ ((ansible_processor_vcpus | int) / 4) | int }}"
+
+- name: 批量更新 BeeGFS 管理/服务端配置文件
+  lineinfile:
+    path: /etc/beegfs/beegfs-mgmtd.conf
+    regexp: "^([[:space:]]*{{ item.key }}[[:space:]]*=)[[:space:]]*.*$"
+    line: "{{ item.key }} = {{ item.value }}"
+    state: present
+  loop:
+    - { key: 'storeMgmtdDirectory', value: '{{ mgmtd_mount }}/mgmtd' }
+    - { key: 'connDisableAuthentication', value: 'true' }
+    - { key: 'storeAllowFirstRunInit', value: 'false' }
+    - { key: 'connInterfacesFile', value: '/etc/beegfs/beegfs-mgmtd-conn-inf.conf' }
+    - { key: 'tuneNumWorkers', value: "{{ calculated_num_workers }}" }
+    - { key: 'connMaxInternodeNum', value: '512' }
+
+
+- name: 配置固定的 nodeID
+  copy:
+    content: "{{ node_id_name }}\n"
+    dest: /etc/beegfs/mgmtd_nodeID
+    mode: '0644'
+
+- name: 创建 nodeID 软链接
+  file:
+    src: /etc/beegfs/mgmtd_nodeID
+    dest: "{{ mgmtd_mount }}/mgmtd/nodeID"
+    state: link
+    force: yes
+
+- name: 创建 systemd override 目录
+  file:
+    path: /etc/systemd/system/beegfs-mgmtd.service.d/
+    state: directory
+
+- name: 配置 systemd 优先级 override.conf
+  copy:
+    content: |
+      [Service]
+      Nice=-20
+      IOSchedulingClass=realtime
+      IOSchedulingPriority=0
+      OOMScoreAdjust=-900
+    dest: /etc/systemd/system/beegfs-mgmtd.service.d/override.conf
+
+- name: 启动并开机自启 beegfs-mgmtd
+  systemd:
+    name: beegfs-mgmtd
+    state: restarted
+    enabled: yes
+    daemon_reload: yes

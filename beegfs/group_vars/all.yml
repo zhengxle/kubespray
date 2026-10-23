@@ -1,0 +1,4 @@
+---
+mgmtd_ip: "172.18.1.2"
+beegfs_interface: "bond_storage0"
+beegfs_pkg_dir: "/mnt/nfs_data/beegfs/beegfs_7.4.6"

@@ -70,13 +70,11 @@ def run_test(group, test_bin, log_dir):
 #   -x MCCL_SOCKET_IFNAME=bond0 
 #   -x LD_LIBRARY_PATH=/opt/maca/lib:/opt/maca/ompi/lib 
 #   -x MCCL_IB_TC=160 
-#   -x MCCL_FAST_WRITE_BACK=1 
-#   -x MCCL_EARLY_WRITE_BACK=15 
 #   -x MCCL_CROSS_NIC=1 
 #   -x FORCE_ACTIVE_WAIT=2 
 #   /opt/maca/samples/mccl_tests/perf/mccl_perf/alltoall_perf -b 1K -e 2G -d float -f 2 -g 1 -n 200
 
-#/opt/maca/ompi/bin/mpirun -n 32 -mca plm_rsh_num_concurrent 256 -mca pml ^ucx -mca btl ^openib -mca routed direct -mca osc ^ucx -mca btl_tcp_if_include bond0 -mca oob_tcp_if_include bond0 -x MCCL_IB_HCA=bnxt_bond_c0,bnxt_bond_c1,bnxt_bond_c2,bnxt_bond_c3 -x MCCL_SOCKET_IFNAME=bond0 -x MCCL_CROSS_NIC=1 -x MCCL_FAST_WRITE_BACK=1 -x MCCL_EARLY_WRITE_BACK=15 -x FORCE_ACTIVE_WAIT=2 -x MCCL_IB_TC=160 -x LD_LIBRARY_PATH=/opt/maca/lib:/opt/maca/ompi/lib -host 172.17.0.5:8,172.17.0.6:8,172.17.0.7:8,172.17.0.8:8 /opt/maca/samples/mccl_tests/perf/mccl_perf/alltoall_perf -b 1K -e 2G -d float -f 2 -n 200
+#/opt/maca/ompi/bin/mpirun -n 32 -mca plm_rsh_num_concurrent 256 -mca pml ^ucx -mca btl ^openib -mca routed direct -mca osc ^ucx -mca btl_tcp_if_include bond0 -mca oob_tcp_if_include bond0 -x MCCL_IB_HCA=bnxt_bond_c0,bnxt_bond_c1,bnxt_bond_c2,bnxt_bond_c3 -x MCCL_SOCKET_IFNAME=bond0 -x MCCL_CROSS_NIC=1 -x FORCE_ACTIVE_WAIT=2 -x MCCL_IB_TC=160 -x LD_LIBRARY_PATH=/opt/maca/lib:/opt/maca/ompi/lib -host 172.17.0.5:8,172.17.0.6:8,172.17.0.7:8,172.17.0.8:8 /opt/maca/samples/mccl_tests/perf/mccl_perf/alltoall_perf -b 1K -e 2G -d float -f 2 -n 200
 
         cmd = [
             '/opt/maca/ompi/bin/mpirun',
@@ -93,8 +91,6 @@ def run_test(group, test_bin, log_dir):
             '-x', 'MCCL_SOCKET_IFNAME=bond0',
             '-x', 'LD_LIBRARY_PATH=/opt/maca/lib:/opt/maca/ompi/lib',
             '-x', 'MCCL_IB_TC=160',
-            '-x', 'MCCL_FAST_WRITE_BACK=1',
-            '-x', 'MCCL_EARLY_WRITE_BACK=15',
             '-x', 'MCCL_CROSS_NIC=1',
             '-x', 'FORCE_ACTIVE_WAIT=2',
             f'/opt/maca/samples/mccl_tests/perf/mccl_perf/{test_bin}',

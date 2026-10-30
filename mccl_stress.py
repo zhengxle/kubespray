@@ -71,8 +71,7 @@ def run_test(iter_idx, log_file, alg, card_num, host_ip,
     lib_path_env = f"-x LD_LIBRARY_PATH={maca_path}/lib:{maca_path}/ompi/lib"
 
     env_var = (f"-x MCCL_IB_HCA={ib_port} -x MCCL_SOCKET_IFNAME={nic_name} "
-               f"-x MCCL_CROSS_NIC=1 -x MCCL_FAST_WRITE_BACK=1 "
-               f"-x MCCL_EARLY_WRITE_BACK=15 {perf_env} {lib_path_env}")
+               f"-x MCCL_CROSS_NIC=1 {perf_env} {lib_path_env}")
 
     testcmd = (
         f"{maca_path}/ompi/bin/mpirun -n {card_num} "

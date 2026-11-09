@@ -1,6 +1,6 @@
 ---
 - name: Replace Ubuntu apt source with Tsinghua mirror
-  hosts: kube_node
+  hosts: all
   become: true
   gather_facts: true
 

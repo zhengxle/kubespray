@@ -1,6 +1,6 @@
 ---
 - name: Configure system timezone and chrony clock sync
-  hosts: kube_node
+  hosts: all
   become: true
   gather_facts: false
 

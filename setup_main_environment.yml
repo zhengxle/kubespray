@@ -40,6 +40,18 @@
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }} kernel version is {{ kernel_version.stdout }}"
 
+# 9. 配置时钟同步
+- name: 9. Configure Time and Chrony
+  import_playbook: configure-time-and-chrony.yml
+
+# 10. 禁用 PCIe ACS
+- name: 10. Disable PCIe ACS
+  import_playbook: deploy-disable-pcie-acs.yml
+
+# 11. 配置 CPU 为 performance 模式
+- name: 11. Set CPU Governor to Performance
+  import_playbook: set_cpu_performance.yml
+
 # 7. 配置 NFS
 - name: 7. Setup NFS
   import_playbook: setup_nfs.yml
@@ -58,3 +70,5 @@
     - name: Display NFS Mount Result
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }} NFS status: {{ nfs_check.stdout if nfs_check.rc == 0 else 'NOT MOUNTED' }}"
+
+

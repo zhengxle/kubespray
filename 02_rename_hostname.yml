@@ -1,6 +1,6 @@
 ---
 - name: 批量修改主机名
-  hosts: gpu_nodes
+  hosts: all
   gather_facts: no
   become: yes
   tasks:

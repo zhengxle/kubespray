@@ -4,7 +4,6 @@ set -o pipefail
 
 # Broadcom RoCE LAG / 4 Compute Rails + 1 Storage Rail bandwidth test
 RAIL_COUNT=5
-BASE_COMPUTE_NET="172.19"
 
 MSG_SIZE=${MSG_SIZE:-4194304}
 QP=${QP:-${QPS:-8}}
@@ -20,11 +19,11 @@ SERVER_PIDS=()
 
 declare -A bond_map
 
-bond_map['bond_c0']="2"
-bond_map['bond_c1']="0"
-bond_map['bond_c2']="6"
-bond_map['bond_c3']="4"
-bond_map['bond_s0']="-1"
+bond_map['bnxt_bond_c0']="2"
+bond_map['bnxt_bond_c1']="0"
+bond_map['bnxt_bond_c2']="6"
+bond_map['bnxt_bond_c3']="4"
+bond_map['bnxt_bond_s0']="-1"
 
 usage() {
     cat <<'USAGE'
@@ -63,7 +62,7 @@ require_cmd() {
 }
 
 valid_node_id() {
-    [[ "$1" =~ ^[0-9]+$ ]] && (( "$1" >= 1 && "$1" <= 254 ))
+    [[ "$1" =~ ^[0-9]+$ ]] && (( "$1" >= 1 && "$1" <= 400 ))
 }
 
 rail_netdev() {
@@ -78,11 +77,11 @@ rail_netdev() {
 rail_rdmadev() {
     local rail="$1"
     if (( rail < 4 )); then
-        echo "bond_c${rail}"
+        echo "bnxt_bond_c${rail}"
     else
         # 1. 优先检查是否存在明确的 bond_s0 或 bnxt_re_bond0
-        if rdma dev 2>/dev/null | grep -qw "bond_s0"; then
-            echo "bond_s0"
+        if rdma dev 2>/dev/null | grep -qw "bnxt_bond_s0"; then
+            echo "bnxt_bond_s0"
         elif rdma dev 2>/dev/null | grep -qw "bnxt_re_bond0"; then
             echo "bnxt_re_bond0"
         else
@@ -92,39 +91,9 @@ rail_rdmadev() {
             if [[ -n "$auto_dev" ]]; then
                 echo "$auto_dev"
             else
-                echo "bond_s0"
+                echo "bnxt_bond_s0"
             fi
         fi
-    fi
-}
-
-rail_ip_local() {
-    local rail="$1" node="$2"
-    if (( rail < 4 )); then
-        echo "${BASE_COMPUTE_NET}.${rail}.${node}"
-    else
-        local netdev
-        netdev=$(rail_netdev "$rail")
-        # local ip
-        # ip=$(ip -4 -o addr show dev "$netdev" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)
-        # if [[ -z "$ip" ]]; then
-        #     err "Failed to detect local IPv4 address on ${netdev}"
-        #     return 1
-        # fi
-        echo "$ip"
-    fi
-}
-
-rail_ip_remote() {
-    local rail="$1" local_node="$2" remote_node="$3"
-    if (( rail < 4 )); then
-        echo "${BASE_COMPUTE_NET}.${rail}.${remote_node}"
-    else
-        local local_storage_ip
-        local_storage_ip=$(rail_ip_local "$rail" "$local_node")
-        local prefix
-        prefix=$(echo "$local_storage_ip" | cut -d. -f1-3)
-        echo "${prefix}.${remote_node}"
     fi
 }
 
@@ -153,24 +122,8 @@ preflight() {
 check_rail_local() {
     local rail="$1" node="$2" ip="$3"
     local netdev rdmadev
-    # ip=$(rail_ip_local "$rail" "$node") || return 1
     netdev=$(rail_netdev "$rail")
     rdmadev=$(rail_rdmadev "$rail")
-
-    # if ! ip -o link show dev "$netdev" >/dev/null 2>&1; then
-    #     err "Netdev ${netdev} does not exist"
-    #     return 1
-    # fi
-
-    # if ! ip -4 -o addr show dev "$netdev" | grep -qw "$ip"; then
-    #     err "${netdev} does not have IPv4 ${ip}"
-    #     return 1
-    # fi
-
-    # if ! rdma dev 2>/dev/null | grep -qw "$rdmadev"; then
-    #     err "RDMA device ${rdmadev} not found in 'rdma dev'"
-    #     return 1
-    # fi
 
     log "rail${rail} ($( [ $rail -eq 4 ] && echo "Storage" || echo "Compute" )): netdev=${netdev}, rdmadev=${rdmadev}, ip=${ip}, port=$(rail_port "$rail")"
 }
@@ -178,7 +131,6 @@ check_rail_local() {
 server_one() {
     local rail="$1" node="$2" ip="$3"
     local dev port tool outfile
-    # ip=$(rail_ip_local "$rail" "$node")
     dev=$(rail_rdmadev "$rail")
     port=$(rail_port "$rail")
     tool=$(pick_bw_tool)

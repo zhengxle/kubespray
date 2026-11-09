@@ -7,7 +7,7 @@
 #   ansible-playbook -i inventory disable_apt_auto_update.yml
 
 - name: 彻底关闭系统 APT 自动更新功能
-  hosts: kube_node
+  hosts: all
   become: true
   tasks:
 

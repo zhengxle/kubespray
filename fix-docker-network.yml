@@ -1,0 +1,131 @@
+---
+- name: 修复 Docker 网段与存储网 172.18.0.0/16 冲
+  # hosts: kube_node
+  hosts: kube_control_plane
+  become: true
+  serial: 20                      # 每批 20 台，滚动执行，避免全集群同时重启
+  vars:
+    # 要合并进 daemon.json 的配置
+    docker_daemon_patch:
+      bip: "172.30.0.1/24"
+      default-address-pools:
+        - base: "10.200.0.0/16"   # 自定义网络从这里分配，避开 172.17/18/19
+          size: 24
+      live-restore: true          # 以后重启 daemon 不杀容器（本次重启仍会停容器）
+    # 需要清理的冲突网段前缀
+    conflict_prefixes: "172.17. 172.18. 172.19."
+    # 是否强制删除有容器挂载的冲突网络（会先 disconnect 容器）
+    force_remove: false
+
+  tasks:
+    # ---------- 1. 读取并合并 daemon.json ----------
+    - name: 检查 daemon.json 是否存在
+      stat:
+        path: /etc/docker/daemon.json
+      register: daemon_json_stat
+
+    - name: 读取现有 daemon.json
+      slurp:
+        src: /etc/docker/daemon.json
+      register: daemon_json_raw
+      when: daemon_json_stat.stat.exists
+
+    - name: 解析现有配置
+      set_fact:
+        daemon_json_current: "{{ (daemon_json_raw.content | b64decode | from_json) if daemon_json_stat.stat.exists else {} }}"
+
+    - name: 合并配置（保留 nvidia-runtime 等已有配置）
+      set_fact:
+        daemon_json_merged: "{{ daemon_json_current | combine(docker_daemon_patch, recursive=True) }}"
+
+    - name: 确保 /etc/docker 目录存在
+      file:
+        path: /etc/docker
+        state: directory
+        mode: "0755"
+
+    - name: 写入新的 daemon.json（自动备份旧文件）
+      copy:
+        content: "{{ daemon_json_merged | to_nice_json }}\n"
+        dest: /etc/docker/daemon.json
+        backup: true              # 旧文件备份为 daemon.json.xxx~
+        mode: "0644"
+      register: daemon_json_changed
+
+    # ---------- 2. 清理占用冲突网段的自定义 bridge 网络 ----------
+    - name: 描并删除冲突网段的 docker 自定义网络
+      shell: |
+        set -e
+        removed=""
+        skipped=""
+        for net in $(docker network ls -q --filter driver=bridge); do
+          name=$(docker network inspect "$net" -f '{{ "{{.Name}}" }}')
+          # 默认 bridge（docker0）由 bip 管理，跳过
+          [ "$name" = "bridge" ] && continue
+          subnet=$(docker network inspect "$net" -f '{{ "{{range .IPAM.Config}}{{.Subnet}} {{end}}" }}')
+          hit=0
+          for p in {{ conflict_prefixes }}; do
+            case "$subnet" in *"$p"*) hit=1 ;; esac
+          done
+          [ "$hit" -eq 0 ] && continue
+          containers=$(docker network inspect "$net" -f '{{ "{{len .Containers}}" }}')
+          if [ "$containers" -gt 0 ]; then
+            if [ "{{ force_remove }}" = "True" ]; then
+              for cid in $(docker network inspect "$net" -f '{{ "{{range $k,$v := .Containers}}{{$k}} {{end}}" }}'); do
+                docker network disconnect -f "$net" "$cid" || true
+              done
+              docker network rm "$net" && removed="$removed $name($subnet)"
+            else
+              skipped="$skipped $name($subnet,containers=$containers)"
+            fi
+          else
+            docker network rm "$net" && removed="$removed $name($subnet)"
+          fi
+        done
+        echo "REMOVED:$removed"
+        echo "SKIPPED:$skipped"
+      register: net_cleanup
+      changed_when: "'REMOVED: ' not in net_cleanup.stdout or net_cleanup.stdout.split('REMOVED:')[1].split('SKIPPED')[0] | trim | length > 0"
+
+    - name: 显示网络清理结果
+      debug:
+        msg: "{{ net_cleanup.stdout_lines }}"
+
+    - name: 有容器挂载冲突网络、未被删除时告警
+      debug:
+        msg: "⚠️ 本机有冲突网络因挂载容器未删除，请人工处理或设置 force_remove=true"
+      when: "'SKIPPED: ' not in net_cleanup.stdout and net_cleanup.stdout.split('SKIPPED:')[1] | trim | length > 0"
+
+    # ---------- 3. 重启 docker ----------
+    - name: 重启 docker
+      systemd:
+        name: docker
+        state: restarted
+      when: daemon_json_changed.changed or net_cleanup.changed
+
+    - name: 等待 docker 就绪
+      command: docker info
+      register: docker_ready
+      until: docker_ready.rc == 0
+      retries: 10
+      delay: 3
+      changed_when: false
+
+    # ---------- 4. 验证 ----------
+    - name: 验证 172.18.1.1 的路由出口
+      command: ip route get 172.18.1.1
+      register: route_check
+      changed_when: false
+
+    - name: 路由必须走 bond_storage0，否则本机标记失败
+      assert:
+        that:
+          - "'bond_storage0' in route_check.stdout"
+        fail_msg: "路由仍未走 bond_storage0: {{ route_check.stdout }}"
+        success_msg: "OK: {{ route_check.stdout_lines[0] }}"
+
+    - name: 验证存储网关连通性
+      command: ping -c 2 -W 2 172.18.1.254
+      register: ping_gw
+      changed_when: false
+      failed_when: ping_gw.rc != 0

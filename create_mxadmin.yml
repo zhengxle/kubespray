@@ -1,0 +1,51 @@
+---
+- name: 在 kube_node 节点上创建 mxadmin 账户并配置 sudo
+  # hosts: kube_node
+  hosts: kube_control_plane
+  become: yes
+  gather_facts: no
+
+  vars:
+    user_name: mxadmin
+    user_password: "MX@WSX3edc"
+    user_groups:
+      - docker
+      - video
+    user_shell: /bin/bash
+    sudo_nopasswd: false      # true = 免密 sudo
+
+  tasks:
+    - name: 确保所需的组存在
+      ansible.builtin.group:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ user_groups }}"
+
+    - name: 创建用户并设置密码、附加组
+      ansible.builtin.user:
+        name: "{{ user_name }}"
+        password: "{{ user_password | password_hash('sha512') }}"
+        groups: "{{ user_groups | join(',') }}"
+        append: yes
+        shell: "{{ user_shell }}"
+        create_home: yes
+        state: present
+        update_password: on_create
+
+    - name: 配置 sudoers
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/{{ user_name }}
+        content: "{{ user_name }} ALL=(ALL:ALL) {{ 'NOPASSWD: ' if sudo_nopasswd else '' }}ALL\n"
+        owner: root
+        group: root
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    - name: 校验 sudo 权限
+      ansible.builtin.command: sudo -l -U {{ user_name }}
+      register: sudo_check
+      changed_when: false
+
+    - name: 显示结果
+      ansible.builtin.debug:
+        msg: "{{ sudo_check.stdout_lines }}"

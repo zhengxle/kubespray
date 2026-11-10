@@ -1,7 +1,6 @@
 ---
 - name: 修复 Docker 网段与存储网 172.18.0.0/16 冲
-  # hosts: kube_node
-  hosts: kube_control_plane
+  hosts: all
   become: true
   serial: 20                      # 每批 20 台，滚动执行，避免全集群同时重启
   vars:

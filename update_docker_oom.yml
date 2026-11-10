@@ -1,0 +1,39 @@
+---
+- name: Update Docker Systemd Limits for OOM Prevention on GPU Servers
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Ensure the docker.service.d directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy override.conf to remove memory limits
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/docker.service.d/override.conf
+        content: |
+          [Service]
+          MemoryMax=infinity
+          MemoryHigh=infinity
+          LimitMEMLOCK=infinity
+          LimitSTACK=infinity
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Docker
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+  handlers:
+    - name: Restart Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+        enabled: yes

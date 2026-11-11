@@ -376,3 +376,15 @@ registry_enabled: true
 registry_storage_class:
 registry_hosts: "192.168.199.101"
 registry_port: "5000"
+
+override_system_hostname: false
+
+
+# 离线缓存指定的各组件版本（与本地缓存完全一致）
+kube_version: 1.35.4
+containerd_version: "2.2.3"
+runc_version: "1.4.2"
+etcd_version: "3.6.10"
+crictl_version: "1.35.0"
+helm_version: "3.18.4"
+nerdctl_version: "2.2.2"
